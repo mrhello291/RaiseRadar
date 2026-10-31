@@ -13,9 +13,20 @@ Finds startups that **recently raised a Series B/C** (anywhere in the world), wo
 
 ![The report: companies with their funding, investors, sources and open roles](docs/screenshot-list.png)
 
+## Three ways to run it
+
+| | for | you need | jump to |
+|---|---|---|---|
+| **On your computer** | looking now and then | Python 3.11+ | [Try it first](#try-it-first-no-key-no-network-10-seconds), [Get real data](#get-real-data) |
+| **GitHub Pages** | a page that updates itself, no server | a GitHub account | [Fork and go](#fork-and-go-github-pages-no-server) |
+| **Docker** | an always-on page on a VM or home server | Docker | [Run it with Docker](#run-it-with-docker-always-on-page) |
+
 ## Try it first (no key, no network, 10 seconds)
 
+Needs Python 3.11 or newer.
+
 ```bash
+git clone https://github.com/mrhello291/RaiseRadar && cd RaiseRadar
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
 .venv/bin/raiseradar demo --open
 ```
@@ -80,6 +91,7 @@ Things to know:
 - **The page is public** to anyone with the link, even if your repository is private (Pages for private repositories needs a paid GitHub plan). That is why it is built with `--public`: see below.
 - **Scheduled workflows in a fork are off until you enable Actions**, and GitHub pauses them after 60 days without activity in the repository. Re-enable them from the Actions tab.
 - Some company sites block cloud servers, so a run on GitHub may find a few fewer job boards than the same run at home.
+- The repository also has a **Docker image** workflow (`.github/workflows/docker.yml`). In a fork it runs on every push and publishes an image to your own GitHub registry. If you do not want that, disable it in the Actions tab.
 
 ### Report for a public website
 
@@ -166,7 +178,7 @@ Prefer not to use cron? `raiseradar serve` (or the Docker image) does this sched
 | Job lists | **re-fetched every run** (one request per company, no LLM); new jobs are flagged NEW, vanished ones are marked closed. A failed fetch never closes jobs. |
 | Experience / level / work mode | recomputed locally from the fetched job text |
 
-Everything lives in `data/companyfinder.db`. Deleting it resets all of the above (including the LLM work). Old databases are upgraded automatically.
+Everything lives in `data/companyfinder.db` (the file keeps the name the project had before it was renamed, so existing databases keep working). Deleting it resets all of the above (including the LLM work). Old databases are upgraded automatically.
 
 ## How each piece works (and where it can be wrong)
 
@@ -186,7 +198,11 @@ Free OpenRouter limits are small (roughly 20 requests/min and a low daily cap wi
 - **No funding items / LLM warnings in the log**: see `data/llm_failures.jsonl` (raw text of unusable replies, with model and finish reason). Try `raiseradar models`, then `bench`, then set `OPENROUTER_MODEL`. "rate limited" is the free tier pushing back; the next model in the chain is tried automatically.
 - **A company shows the wrong jobs**: its website was probably a namesake. Check the ⚠ badge, then `add "Name" --website the-right-site.com`.
 - **A company shows no jobs**: the badge says why (e.g. "no careers page found", "uses workday (not supported yet)", "homepage unreachable"). Open its hiring page link; if it is a board we support but could not detect, force it: `add "Name" --ats greenhouse --slug the-slug`.
-- **Start fresh**: delete `data/` (this also throws away the LLM work).
+- **Start fresh**: delete `data/` (this also throws away the LLM work). With Docker: `docker compose down -v` removes the volumes.
+- **GitHub Pages: the "deploy" job fails**: Pages is not switched on yet. Settings > Pages > Source: GitHub Actions, then run the workflow again.
+- **GitHub Pages shows the same old page**: look at the latest run in the Actions tab; a failed run keeps the previous page. A run is stopped after two hours; if that ever happens to a first run, start it again.
+- **`docker compose up` builds the image instead of pulling it**, or `docker pull` says denied: the published image is not public (yet). Building from the repository works the same, just slower.
+- **The Docker page only shows "Sample data"**: the first real run is still going (about 30 minutes). `docker compose logs -f` shows its progress.
 
 ## Tests
 

@@ -115,7 +115,7 @@ def test_a_failed_run_is_retried_in_an_hour_not_every_tick(tmp_path, monkeypatch
 
 def test_serve_command_line_settings(tmp_path, monkeypatch):
     seen = []
-    monkeypatch.setattr(serve_mod, "serve", lambda cfg, host, port, full, jobs, public=None, ready=None: seen.append((host, port, full, jobs, public)))
+    monkeypatch.setattr(serve_mod, "serve", lambda cfg, host, port, full, jobs, public=None, ready=None, tracker=None: seen.append((host, port, full, jobs, public)))
     cfgp = tmp_path / "config.toml"
     cfgp.write_text("")
     cli.main(["-c", str(cfgp), "serve"])

@@ -54,6 +54,18 @@ DEFAULTS: dict[str, dict[str, Any]] = {
     },
     "http": {"timeout": 15, "min_delay_per_host": 0.3, "respect_robots": True, "workers": 8},
     "jobs": {"max_jobs_per_company": 300, "rediscover_days": 14},
+    "history": {
+        "close_after_fetches": 2,       # a role must be missing from this many fetches in a row to count as closed
+        "mass_close_after_fetches": 4,  # same, when most of a company's roles vanish at once (probably a glitch, not layoffs)
+        "show_closed_days": 60,         # the report lists roles that closed within this many days
+        "trend_days": 90,               # the open-roles chart covers this many days
+        "keep_closed_text_days": 90,    # job descriptions of roles closed longer ago are dropped (title, dates and link stay)
+    },
+    "tracker": {
+        "path": "data/applications.db",
+        "follow_up_days": 14,           # an application with no news for this many days is flagged
+        "embed_in_report": True,        # show your applications inside index.html (never in data.json, CSV or the digest)
+    },
     "profile": {
         "roles": [],
         "exclude_titles": [],

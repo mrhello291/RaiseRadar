@@ -77,6 +77,23 @@ max_jobs_per_company = 300
 # Re-run careers/ATS discovery for a company at most this often (days).
 rediscover_days = 14
 
+[history]
+# A role must be missing from this many fetches in a row before it counts as closed (a job board can glitch for one request).
+close_after_fetches = 2
+# The same, when most of a company's roles vanish at once (an ATS migration or a broken parser looks like that).
+mass_close_after_fetches = 4
+show_closed_days = 60        # the report lists roles that closed within this many days ("No longer listed")
+trend_days = 90              # the open-roles chart covers this many days
+keep_closed_text_days = 90   # the job description of a role that closed longer ago is dropped (title, dates and link stay); 0 = keep
+
+[tracker]
+# Your applications live in their own file, apart from the job database (which can be rebuilt). Back this file up.
+path = "data/applications.db"
+follow_up_days = 14          # an application with no news for this long gets a "follow up?" flag
+# Show your applications inside reports/index.html. They are never written to data.json, the CSV files or the digest,
+# and never to a public report. Set false to keep them out of the HTML file as well.
+embed_in_report = true
+
 [profile]
 # Used to flag jobs that fit you ("matches profile"). Nothing is hidden by default; the report just lets you filter.
 # Regexes matched against the job title. Empty list = every job matches.

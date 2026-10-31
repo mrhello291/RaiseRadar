@@ -29,7 +29,7 @@ def test_public_report_is_noindex_and_the_normal_one_is_not(tmp_path):
 
 
 def _long_descriptions(monkeypatch):
-    def fake_build(p):
+    def fake_build(p, tracker=False):
         d = build_demo_data()
         for c in d["companies"]:
             for j in c["jobs"]:

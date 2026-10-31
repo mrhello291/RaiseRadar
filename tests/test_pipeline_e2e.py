@@ -180,7 +180,9 @@ def test_second_run_is_incremental(env):
     p2 = make()
     stats = p2.run_all(news=True, yc=False)
     assert stats["candidates"] == 0 and len(world.llm_prompts) == 1                  # articles already handled: no new LLM call
-    assert stats["jobs_new"] == 1 and stats["jobs_closed"] == 1
+    assert stats["jobs_new"] == 1 and stats["jobs_closed"] == 0      # the vanished role is only closed once it is missing twice
+    s3 = make().fetch_jobs()
+    assert s3["jobs_new"] == 0 and s3["jobs_closed"] == 1
     acme = db.find_company("Acme")
     assert {j["title"] for j in db.jobs_for(acme["id"])} == {"Senior Backend Engineer", "Software Engineer", "Frontend Engineer"}
     assert len(db.jobs_for(acme["id"], active_only=False)) == 4

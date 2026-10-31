@@ -1,6 +1,6 @@
 # RaiseRadar
 
-Finds startups that **recently raised a Series B/C** (anywhere in the world), works out **whether they are hiring**, and lists every open role with **required experience, work mode, level, location, pay and the full job description**. Runs on a schedule; results land in a searchable, filterable HTML page.
+Finds startups that **recently raised a Series B/C** (anywhere in the world), works out **whether they are hiring**, and lists every open role with **required experience, work mode, level, location, pay and the full job description**. It remembers **how each company's hiring changes over time** and lets you **keep track of the roles you applied to**. Runs on a schedule; results land in a searchable, filterable HTML page.
 
 ```
  funding news (Google News RSS x rounds x regions + RSS feeds) ──► free LLM extracts company/round/amount/investors
@@ -65,8 +65,9 @@ Times are for one run on a normal connection. "Measured" means timed on this pro
 | `setup [--check] [--replace]` | check your OpenRouter key and store it in `.env` (`--check` only tests the current one) | a few seconds |
 | `run [--open] [--public]` | the whole pipeline, then rebuilds the report (`--skip-news`, `--skip-yc`, `--limit N` for quick tests; `--open` shows the page when done; `--public` see [Report for a public website](#report-for-a-public-website)) | **first run ~30 minutes**; later runs a few minutes; `--skip-news` much shorter |
 | `discover` / `resolve` / `careers` / `jobs` | run one stage on its own (`--limit N`; `resolve`/`careers` take `--force`) | `discover` is the slow, LLM-bound one; the others depend on how many companies are new |
-| `serve [--host H] [--port P] [--full-every HOURS] [--jobs-every HOURS] [--no-schedule] [--public]` | a web page for the report that refreshes itself on a schedule (default: full run every 12 hours, jobs every 4); this is what the Docker image runs | starts at once; the runs inside it take as long as `run` |
+| `serve [--host H] [--port P] [--full-every HOURS] [--jobs-every HOURS] [--no-schedule] [--public] [--tracker\|--no-tracker]` | a web page for the report that refreshes itself on a schedule (default: full run every 12 hours, jobs every 4); this is what the Docker image runs | starts at once; the runs inside it take as long as `run` |
 | `report [--open] [--public]` | rebuild the page, CSV and JSON from the database, no network | about 0.5 seconds with 155 companies / ~3,000 roles (measured) |
+| `track set applied <words>` (also `add`, `list`, `show`, `note`, `rm`) | keep track of roles you saved, applied to or want to hide; see [Track your applications](#track-your-applications) | instant |
 | `add "Acme" --website acme.com --round "Series B"` | add or correct a company by hand (also `--ats lever --slug acme` to force a job board) | instant; its jobs arrive on the next `run` |
 | `resolve --recheck` | re-grade websites that were auto-matched earlier (YC / hand-added ones are never touched) | minutes (one page fetch per company) |
 | `list [--top N]` | ranked companies in the terminal | under 1 second (measured) |
@@ -121,6 +122,7 @@ docker run -d --name raiseradar --restart unless-stopped -p 127.0.0.1:8080:8080 
 - **Schedule:** a full run every 12 hours and a jobs-only refresh every 4 (change them in `config.toml` under `[serve]`, and mount your file by uncommenting the line in `compose.yaml`). A run that was interrupted (for example by `docker stop`) continues where it stopped.
 - **Your data lives in two Docker volumes** (`docker volume ls`): the database (keep it, it holds the AI work) and the report files. Update with `docker compose pull && docker compose up -d`; the volumes stay.
 - **No key:** you still get real Y Combinator companies and their open roles, but no funding news.
+- **Your applications** (see [Track your applications](#track-your-applications)) are saved in the same data volume, in `applications.db`. `compose.yaml` turns on saving from the page because its port is limited to this computer; if you publish the port to your network, remove `RAISERADAR_TRACKER` from it.
 - **There is no login.** The compose file publishes the port to this computer only (`127.0.0.1`). To let other people see it, put it behind a reverse proxy with a password, or at least add `[report] public = true` to your `config.toml` so job descriptions are shortened (see [Report for a public website](#report-for-a-public-website)).
 - The image runs as a normal user, contains no key or data (those come from `.env` and the volumes), and is built for amd64 and arm64.
 
@@ -130,17 +132,55 @@ Per company: round, amount, **investors** (and who led), **when** announced, **w
 
 Filters: search, round, source, HQ country, **work mode** chips, **level** chips (Intern ... Exec, with job counts), job **location** text (comma = any of), role type, **posting age** (7 / 30 / 90 days), max years of experience, hiring only / new only / matches my profile, and *hide unverified websites*. Your choices are remembered in the browser; *Reset* clears them.
 
-**How old are the openings?** Only roles that are open *right now* are listed. Every run re-reads each company's job board; a role that has disappeared from it is marked closed (kept in the database, not shown or exported). The *Posted* column is the date the job board gives. If a board gives none, it shows when this tool first noticed the role, or "-" if the role was already open when the company was first checked.
+**How old are the openings?** The main list shows roles that are open *right now*. Every run re-reads each company's job board; a role that has disappeared from it is marked closed and moves to that company's *No longer listed* box (see [Hiring history](#hiring-history)). The *Posted* column is the date the job board gives. If a board gives none, it shows when this tool first noticed the role, or "-" if the role was already open when the company was first checked.
 
 **What counts as NEW:** a role posted in the last `new_days` days (by the board's own date), or, for boards with no dates, one that appeared in a later fetch than the company's first. A company is NEW when its funding was announced in the last `new_days` days. The roles you see on a first run are therefore not all flagged NEW.
 
-Also written: `companies.csv`, `jobs.csv`, `data.json`, and `digest.md` (what is new since the last runs).
+Also written: `companies.csv`, `jobs.csv`, `data.json`, and `digest.md` (what is new since the last runs, and which companies are hiring more).
+
+### Hiring history
+
+RaiseRadar notes how many roles each company has open every time it looks (one point per day), so you can see who is **ramping up**:
+
+- A small line on each company shows the number of open roles over the last 90 days, and a badge such as **+3 open roles in 12d** compares today with 30 days ago (or with the oldest point, if the history is shorter). It only appears once there are at least 3 days of history. Sort by **Hiring up the most** to put the fastest-growing companies first; `digest.md` lists them under *Hiring up*.
+- **No longer listed** (per company, last 60 days): roles that vanished from the company's page, with how long they were open when that is known. This does **not** mean the role was filled; it may be paused or re-posted. A role that comes back is marked *listed again*.
+- **It only starts when you start.** History is collected from the first run of this version onwards and cannot be filled in backwards, so a fresh install shows no trend for the first few days.
+- **Glitches are not believed straight away.** A role must be missing from two fetches in a row to count as closed. When most of a company's roles vanish at once (an ATS migration or a broken parser looks like that), it waits for four fetches and leaves that moment out of the chart, so one bad fetch does not read as "the company stopped hiring". All of this is adjustable under `[history]`.
+- Closed roles keep their title, dates and link for good, but their long description is dropped after 90 days (`keep_closed_text_days`) so the database stays small.
+
+## Track your applications
+
+![My applications panel and the status menu on each role](docs/screenshot-tracker.png)
+
+Mark roles as **saved, applied, interviewing, offer, rejected or not interested**, add a note, and see the lot in a **My applications** panel at the top of the page. The panel shows when you applied, flags an application with **no news for 14 days** (`follow_up_days`), and warns when the role you applied for is **no longer listed**. Roles you mark *not interested* disappear from the list (an Undo appears; the *My roles* filter brings them back).
+
+Two ways to use it:
+
+1. **In the page** (when it is served by `raiseradar serve` or the Docker image): each role has a *My status* menu, and the expanded role has a note box. Changes are saved at once.
+2. **From a terminal**, anywhere, including with a page you open as a file:
+
+```bash
+raiseradar track set applied lumenfield perception          # words from the company and title; a unique match is enough
+raiseradar track set interviewing "#3" --note "phone screen Monday"
+raiseradar track set ignored 3fa9c1d2                        # the 8-character code is shown in the expanded role
+raiseradar track add --company Acme --title "Data Engineer" --date 2026-09-01   # found somewhere else (referral, another board)
+raiseradar track list            # --status applied, --all to include "not interested"
+raiseradar track show "#3"       # details and history;  note --text "..." <words>;  rm "#3"
+```
+
+If a search matches several roles, nothing changes and the matches are listed so you can repeat the command with one code.
+
+**Where it lives and what it protects:**
+
+- Your applications are in their own file, **`data/applications.db`**, separate from the job database. The job database is a cache that gets rebuilt and cleaned; this file is the only data in the project that cannot be fetched again, so **back it up** (copy the file; with Docker it is in the `raiseradar-data` volume). Each entry keeps its own copy of the company, title and link, so it still reads fine after the role closes.
+- Applications are **never** written to `data.json`, the CSV files or `digest.md`, and a **public report never contains them** (`--public`, `[report] public`, the GitHub Pages build). They are only inside your private `index.html`; set `[tracker] embed_in_report = false` to keep them out of that file too (then only the served page and `track list` show them).
+- **Saving from the page is only offered where it is safe:** when the server listens on this computer only (the default), never for a public page, and not when you serve to other machines (`--host 0.0.0.0`) unless you say so with `--tracker` (or `RAISERADAR_TRACKER=1`, which `compose.yaml` sets because its port is limited to `127.0.0.1`). A web page on another site cannot save anything for you: saving needs a token that only this page is given, requests with an unexpected `Host` or `Origin` are refused, and the server sends no cross-site (CORS) permission. There is still **no login**: anyone who can reach the port can read the page, including your applications, so keep it on `127.0.0.1` or behind a password.
 
 ## Configuration
 
 `config.toml` (every key is optional) and `.env`:
 
-- `.env`: `OPENROUTER_API_KEY`, optionally `RAISERADAR_CONTACT`, and optionally `OPENROUTER_MODEL=a,b,c` (comma-separated, first preferred, rest are fallbacks) which overrides `[llm] models`.
+- `.env`: `OPENROUTER_API_KEY`, optionally `RAISERADAR_CONTACT` (and `RAISERADAR_TRACKER=1` / `RAISERADAR_ALLOWED_HOSTS=name1,name2` if you serve the page to other machines and want to save applications from it), and optionally `OPENROUTER_MODEL=a,b,c` (comma-separated, first preferred, rest are fallbacks) which overrides `[llm] models`.
 - `[general]`: `db_path`, `report_dir`, `recent_days` (only companies funded within this window are processed), `new_days` (how long something counts as NEW), `contact` (put in the User-Agent; or set `RAISERADAR_CONTACT` in `.env` to keep your address out of git).
 - `[serve]`: `host` (127.0.0.1), `port` (8080), `full_every_hours` (12), `jobs_every_hours` (4); 0 turns a schedule off.
 - `[report]`: `public` (default false; same as `--public`), `jd_excerpt_chars` (700; how much of each job description a public report keeps).
@@ -150,6 +190,8 @@ Also written: `companies.csv`, `jobs.csv`, `data.json`, and `digest.md` (what is
 - `[llm]`: `models` (fallback chain), `batch_size`, `max_calls_per_run`, `requests_per_minute`, `max_tokens`, `reasoning_effort`. Reasoning models spend output tokens thinking; a reply that is cut off is salvaged item by item and the unanswered headlines stay queued.
 - `[http]`: timeout, per-host delay, `respect_robots` (robots.txt is honoured for company websites), worker threads.
 - `[jobs]`: `max_jobs_per_company`, `rediscover_days`.
+- `[history]`: `close_after_fetches` (2), `mass_close_after_fetches` (4), `show_closed_days` (60), `trend_days` (90), `keep_closed_text_days` (90). See [Hiring history](#hiring-history).
+- `[tracker]`: `path` (`data/applications.db`), `follow_up_days` (14), `embed_in_report` (true). See [Track your applications](#track-your-applications).
 - `[profile]`: your roles (regexes), excluded titles, max years of experience, locations. Fills the "fits you" badges and the *Matches my profile* filter. Empty = no filtering.
 
 ## Scheduling
@@ -175,10 +217,10 @@ Prefer not to use cron? `raiseradar serve` (or the Docker image) does this sched
 | LLM replies | cached by prompt (a backup; the headline record above does most of the work) |
 | Company websites | looked up once; a failed lookup is retried after 7 days |
 | Careers page / job board | looked up once; no board found: retried after 14 days; temporary failure (site down/blocking): retried the next day |
-| Job lists | **re-fetched every run** (one request per company, no LLM); new jobs are flagged NEW, vanished ones are marked closed. A failed fetch never closes jobs. |
+| Job lists | **re-fetched every run** (one request per company, no LLM); new jobs are flagged NEW. A role missing from two fetches in a row is marked closed (see [Hiring history](#hiring-history)). A failed fetch never closes jobs. |
 | Experience / level / work mode | recomputed locally from the fetched job text |
 
-Everything lives in `data/companyfinder.db` (the file keeps the name the project had before it was renamed, so existing databases keep working). Deleting it resets all of the above (including the LLM work). Old databases are upgraded automatically.
+Everything lives in `data/companyfinder.db` (the file keeps the name the project had before it was renamed, so existing databases keep working). Deleting it resets all of the above (including the LLM work) and the hiring history. Old databases are upgraded automatically. Your applications are **not** in this file: they are in `data/applications.db`, which none of the commands above touch.
 
 ## How each piece works (and where it can be wrong)
 
@@ -198,7 +240,10 @@ Free OpenRouter limits are small (roughly 20 requests/min and a low daily cap wi
 - **No funding items / LLM warnings in the log**: see `data/llm_failures.jsonl` (raw text of unusable replies, with model and finish reason). Try `raiseradar models`, then `bench`, then set `OPENROUTER_MODEL`. "rate limited" is the free tier pushing back; the next model in the chain is tried automatically.
 - **A company shows the wrong jobs**: its website was probably a namesake. Check the ⚠ badge, then `add "Name" --website the-right-site.com`.
 - **A company shows no jobs**: the badge says why (e.g. "no careers page found", "uses workday (not supported yet)", "homepage unreachable"). Open its hiring page link; if it is a board we support but could not detect, force it: `add "Name" --ats greenhouse --slug the-slug`.
-- **Start fresh**: delete `data/` (this also throws away the LLM work). With Docker: `docker compose down -v` removes the volumes.
+- **Start fresh**: delete `data/companyfinder.db` (this throws away the LLM work and the hiring history). Keep `data/applications.db` unless you want to lose your applications too. With Docker: `docker compose down -v` removes the volumes, **including your applications**.
+- **No status menus on the page**: the page is a plain file, or the server is not limited to this computer. Run `raiseradar serve` (or add `--tracker`), or use `raiseradar track` in a terminal. The page shows what the report knew when it was built; a served page always shows the latest.
+- **"bad token: reload the page"**: the server was restarted since the page was loaded. Reload it.
+- **No trend or "+N" badge on a company**: there is less than 3 days of history, or the company's job board could not be read.
 - **GitHub Pages: the "deploy" job fails**: Pages is not switched on yet. Settings > Pages > Source: GitHub Actions, then run the workflow again.
 - **GitHub Pages shows the same old page**: look at the latest run in the Actions tab; a failed run keeps the previous page. A run is stopped after two hours; if that ever happens to a first run, start it again.
 - **`docker compose up` builds the image instead of pulling it**, or `docker pull` says denied: the published image is not public (yet). Building from the repository works the same, just slower.
@@ -207,7 +252,7 @@ Free OpenRouter limits are small (roughly 20 requests/min and a low daily cap wi
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest -q        # ~190 offline tests (under 1 second): mocked LLM + mocked internet, full pipeline included
+.venv/bin/python -m pytest -q        # ~230 offline tests (a few seconds): mocked LLM + mocked internet, full pipeline included
 ```
 
 ## Adding an ATS

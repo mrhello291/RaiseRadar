@@ -177,6 +177,31 @@ COMPANIES = [
 ]
 
 
+# Roles that were open at the start and have closed since (so the sample shows "No longer listed"), and roles that appeared
+# a few days in (so a company's open-roles line goes up). Same tuple layout as the jobs above.
+GONE = {
+    "lumenfield": [("Warehouse Controls Engineer", E, "Engineering", "San Francisco, CA", "onsite", FT, 38, "3+ years of experience with PLCs or motion control", "Comfortable on a factory floor", "", False)],
+    "tessera-health": [("Platform Engineer", E, "Engineering", "London, UK", "hybrid", FT, 41, "3+ years of experience running Kubernetes in production", "Experience with regulated environments", "", False),
+                       ("Clinical Data Analyst", D, "Data", "London, UK", "hybrid", FT, 30, "2+ years of experience with SQL and clinical datasets", "Knowledge of healthcare data standards", "", False)],
+    "parallax-pay": [("Backend Engineer, Payments", E, "Engineering", "Singapore", "hybrid", FT, 25, "3+ years of experience building payment systems", "Experience with card networks is a plus", "", False)],
+}
+RAMP = {
+    "quillstack": [("Machine Learning Engineer", D, "Engineering", "Toronto, Canada", "hybrid", FT, 6, "2+ years of experience training and serving models", "Interest in language models", "", False),
+                   ("Backend Engineer, Platform", E, "Engineering", "Remote - Canada", "remote", FT, 5, "3+ years of experience with Python or Go", "Comfortable owning a service end to end", "", False),
+                   ("Developer Relations Engineer", E, "Engineering", "Toronto, Canada", "hybrid", FT, 5, "2+ years of experience writing technical content or sample code", "Enjoys explaining things", "", False)],
+    "ember-commerce": [("Software Engineer, Search", E, "Engineering", "Sydney, Australia", "hybrid", FT, 6, "2-4 years of experience with search or ranking", "Experience with Elasticsearch or similar", "", False),
+                       ("Data Engineer", D, "Data", "Sydney, Australia", "hybrid", FT, 5, "2-4 years of experience with data pipelines", "Python and SQL", "", False)],
+}
+# Tracked sample applications: (company slug, job position within that company's open roles, status, days since applied, days since last news, note)
+SAMPLE_APPS = [
+    ("lumenfield", 1, "interviewing", 10, 2, "Phone screen done. On-site loop next week."),
+    ("tessera-health", 0, "applied", 22, 22, "Applied through the careers page."),
+    ("kestrel-grid", 0, "saved", None, 1, "Look at this after the weekend."),
+    ("mirabel-labs", 0, "ignored", None, 3, ""),
+]
+SAMPLE_CLOSED_APP = ("parallax-pay", "applied", 31, 31, "No reply yet.")        # applied to a role that has since closed
+
+
 def _days_ago(n: float) -> str:
     return (datetime.now(timezone.utc) - timedelta(days=n)).replace(microsecond=0).isoformat()
 
@@ -218,12 +243,20 @@ def build_demo_db() -> tuple[Pipeline, DB]:
         else:
             db.update_company(cid, careers_checked_at=now, jobs_status=c.get("jobs_status"))
         if ats in ats_mod.ADAPTERS:
-            # Two fetches, like two real runs: the first is the starting snapshot, the second brings the "late" roles.
+            # Five fetches over twelve days, like five real runs: the first is the starting snapshot, roles in GONE disappear
+            # (missing twice in a row before they count as closed), roles in RAMP appear, and the last fetch brings the "late" roles.
             specs = list(enumerate(c["jobs"]))
-            snapshot = [p.enrich_job(_raw(c, s, i), ats, c["slug"]) for i, s in specs if not s[-1]]
-            db.sync_jobs(cid, snapshot, first_fetch, first_fetch=True)
-            everything = [p.enrich_job(_raw(c, s, i), ats, c["slug"]) for i, s in specs]
-            db.sync_jobs(cid, everything, now, first_fetch=False)
+            base = [(i, sp) for i, sp in specs if not sp[-1]]
+            gone = [(100 + i, g) for i, g in enumerate(GONE.get(c["slug"], []))]
+            ramp = [(200 + i, r) for i, r in enumerate(RAMP.get(c["slug"], []))]
+
+            def fetch(items):
+                return [p.enrich_job(_raw(c, sp, i), ats, c["slug"]) for i, sp in items]
+            db.sync_jobs(cid, fetch(base + gone), first_fetch, first_fetch=True)
+            db.sync_jobs(cid, fetch(base + gone), _days_ago(8))
+            db.sync_jobs(cid, fetch(base + ramp), _days_ago(5))
+            db.sync_jobs(cid, fetch(base + ramp), _days_ago(3))
+            db.sync_jobs(cid, fetch(specs + ramp), now)
             db.update_company(cid, jobs_fetched_at=now, jobs_status="ok")
     return p, db
 
@@ -237,7 +270,32 @@ def build_demo_data() -> dict:
         if c["board_url"]:      # never link a sample company to a real job board
             c["board_url"] = f"https://example.com/careers/{spec['slug']}"
     data["demo"] = {"profile": PROFILE_NOTE}
+    data["tracker"] = _sample_tracker(data)
     return data
+
+
+def _sample_tracker(data: dict) -> dict:
+    """A few made-up applications, so the sample shows the tracker. Read-only: the sample page never saves anything."""
+    from .tracker import LABELS, STATUSES, job_code
+    apps, by_slug = [], {}
+    for c in COMPANIES:
+        by_slug[c["slug"]] = next(x for x in data["companies"] if x["name"] == c["name"])
+
+    def entry(i, comp, job, status, applied_days, news_days, note, listing):
+        applied = None if applied_days is None else _days_ago(applied_days)[:10]
+        events = [{"status": status, "at": _days_ago(news_days), "note": note}]
+        if applied and status != "applied":
+            events.insert(0, {"status": "applied", "at": _days_ago(applied_days), "note": ""})
+        return {"id": i, "key": job["key"], "code": job_code(job["key"]), "company": comp["name"], "title": job["title"], "location": job["location"] or "",
+                "url": job["url"], "status": status, "applied_at": applied, "note": note, "created_at": _days_ago(applied_days or news_days),
+                "updated_at": _days_ago(news_days), "events": events, "listing": listing}
+    for n, (slug, pos, status, applied_days, news_days, note) in enumerate(SAMPLE_APPS, 1):
+        comp = by_slug[slug]
+        apps.append(entry(n, comp, comp["jobs"][pos], status, applied_days, news_days, note, "open"))
+    slug, status, applied_days, news_days, note = SAMPLE_CLOSED_APP
+    comp = by_slug[slug]
+    apps.append(entry(len(apps) + 1, comp, comp["closed"][0], status, applied_days, news_days, note, "closed"))
+    return {"apps": apps, "follow_up_days": 14.0, "statuses": [[k, LABELS[k]] for k in STATUSES]}
 
 
 def write_demo(out_dir: str | Path) -> dict:

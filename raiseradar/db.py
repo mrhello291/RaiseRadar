@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS jobs(
   baseline INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_company ON jobs(company_id, active);
+CREATE TABLE IF NOT EXISTS job_counts(
+  company_id INTEGER NOT NULL REFERENCES companies(id), day TEXT NOT NULL, at TEXT, open_count INTEGER NOT NULL,
+  PRIMARY KEY(company_id, day)
+);
 CREATE TABLE IF NOT EXISTS llm_cache(key TEXT PRIMARY KEY, response TEXT, model TEXT, created_at TEXT);
 CREATE TABLE IF NOT EXISTS runs(id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT, finished_at TEXT, stats TEXT);
 """
@@ -73,12 +77,15 @@ class DB:
     def _migrate(self) -> None:
         """Add columns introduced after a database was first created (keeps existing data)."""
         for table, col, decl in (("jobs", "workplace", "TEXT"), ("articles", "attempts", "INTEGER NOT NULL DEFAULT 0"),
-                                 ("jobs", "baseline", "INTEGER NOT NULL DEFAULT 0")):
+                                 ("jobs", "baseline", "INTEGER NOT NULL DEFAULT 0"), ("jobs", "closed_at", "TEXT"),
+                                 ("jobs", "missed", "INTEGER NOT NULL DEFAULT 0"), ("jobs", "reopened", "INTEGER NOT NULL DEFAULT 0")):
             have = {r[1] for r in self.conn.execute(f"PRAGMA table_info({table})")}
             if col not in have:
                 self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
                 if col == "baseline":   # jobs stored before this existed were all found by a first fetch: none of them is "new"
                     self.conn.execute("UPDATE jobs SET baseline=1")
+                if col == "closed_at":  # roles closed before history existed: the last time we saw them is the best date we have
+                    self.conn.execute("UPDATE jobs SET closed_at=last_seen WHERE active=0")
 
     def close(self) -> None:
         self.conn.commit()
@@ -190,6 +197,7 @@ class DB:
         self.conn.execute("UPDATE OR IGNORE funding SET company_id=? WHERE company_id=?", (keep_id, drop_id))
         self.conn.execute("DELETE FROM funding WHERE company_id=?", (drop_id,))
         self.conn.execute("DELETE FROM jobs WHERE company_id=?", (drop_id,))
+        self.conn.execute("DELETE FROM job_counts WHERE company_id=?", (drop_id,))
         fill = {k: drop[k] for k in ("description", "country", "city", "website", "domain", "website_confidence") if not keep.get(k) and drop.get(k)}
         fill["origins"] = json.dumps(list(dict.fromkeys(keep["origins"] + drop["origins"])))
         fill["extra"] = json.dumps({**drop["extra"], **keep["extra"]})
@@ -238,20 +246,36 @@ class DB:
         return out
 
     # -- jobs -----------------------------------------------------------------------
-    def sync_jobs(self, company_id: int, jobs: list[dict], seen_at: str, first_fetch: bool = False) -> tuple[int, int, int]:
-        """Upsert the current job list; jobs no longer listed become inactive. Returns (new, updated, closed).
+    def sync_jobs(self, company_id: int, jobs: list[dict], seen_at: str, first_fetch: bool = False,
+                  close_after: int = 2, mass_close_after: int = 4) -> tuple[int, int, int]:
+        """Upsert the current job list. Returns (new, updated, closed).
+
         first_fetch=True marks the jobs as the starting snapshot: they were open before we looked, so they are not
-        reported as "new" (only roles that appear in later fetches are)."""
+        reported as "new" (only roles that appear in later fetches are).
+
+        A role that is missing from a fetch is not closed straight away: it must be missing `close_after` fetches in a
+        row (a board can glitch for one request). When most of a company's roles vanish at once (an ATS migration or a
+        parser that broke looks exactly like that) the bar is `mass_close_after` fetches, and that fetch is not added to
+        the open-roles history, so one bad fetch never shows up as "the company stopped hiring"."""
         new = updated = 0
-        existing = {r["id"]: r["first_seen"] for r in self.conn.execute("SELECT id, first_seen FROM jobs WHERE company_id=?", (company_id,))}
+        rows = self.conn.execute("SELECT id, active, missed FROM jobs WHERE company_id=?", (company_id,)).fetchall()
+        existing = {r["id"]: r for r in rows}
+        listed = {j["id"] for j in jobs}
+        was_open = [r["id"] for r in rows if r["active"]]
+        still = sum(1 for i in was_open if i in listed)
+        # "suspicious" = at least 5 roles were open and fewer than a quarter of them are still listed
+        suspicious = len(was_open) >= 5 and still * 4 < len(was_open)
         cols = ["title", "department", "location", "remote", "workplace", "employment_type", "url", "apply_url", "posted_at", "description",
                 "salary_text", "exp_min", "exp_max", "exp_source", "exp_mentions", "seniority", "role_family", "matches_profile"]
         for j in jobs:
             vals = [j.get(c) for c in cols]
-            if j["id"] in existing:
+            prev = existing.get(j["id"])
+            if prev is not None:
+                relisted = 0 if prev["active"] else 1       # closed earlier and listed again: the board re-opened it
                 self.conn.execute(
-                    f"UPDATE jobs SET {', '.join(c + '=?' for c in cols)}, last_seen=?, active=1 WHERE id=?",
-                    (*vals, seen_at, j["id"]),
+                    f"UPDATE jobs SET {', '.join(c + '=?' for c in cols)}, last_seen=?, active=1, missed=0, closed_at=NULL, "
+                    "reopened=reopened+? WHERE id=?",
+                    (*vals, seen_at, relisted, j["id"]),
                 )
                 updated += 1
             else:
@@ -260,14 +284,41 @@ class DB:
                     (j["id"], company_id, *vals, seen_at, seen_at, int(first_fetch)),
                 )
                 new += 1
-        listed = {j["id"] for j in jobs}
         closed = 0
-        for jid in existing:
-            if jid not in listed:
-                cur = self.conn.execute("UPDATE jobs SET active=0 WHERE id=? AND active=1", (jid,))
-                closed += cur.rowcount
+        limit = mass_close_after if suspicious else close_after
+        for jid in was_open:
+            if jid in listed:
+                continue
+            missed = existing[jid]["missed"] + 1
+            if missed >= limit:
+                self.conn.execute("UPDATE jobs SET active=0, missed=?, closed_at=? WHERE id=?", (missed, seen_at, jid))
+                closed += 1
+            else:
+                self.conn.execute("UPDATE jobs SET missed=? WHERE id=?", (missed, jid))
+        if not suspicious:
+            self.conn.execute("INSERT OR REPLACE INTO job_counts(company_id, day, at, open_count) VALUES(?,?,?,?)",
+                              (company_id, seen_at[:10], seen_at, len(listed)))
         self.conn.commit()
         return new, updated, closed
+
+    def open_counts(self, company_id: int, since_day: str = "") -> list[tuple[str, int]]:
+        """(day, number of open roles) for one company, oldest first: one point per day, the day's last fetch."""
+        q = self.conn.execute("SELECT day, open_count FROM job_counts WHERE company_id=? AND day>=? ORDER BY day", (company_id, since_day))
+        return [(r[0], r[1]) for r in q]
+
+    def closed_jobs(self, company_id: int, since: str = "") -> list[dict]:
+        """Roles that are no longer listed, most recently closed first (closed_at >= since)."""
+        q = self.conn.execute("SELECT * FROM jobs WHERE company_id=? AND active=0 AND COALESCE(closed_at, last_seen, '') >= ? "
+                              "ORDER BY COALESCE(closed_at, last_seen) DESC, title", (company_id, since))
+        return [dict(r) for r in q]
+
+    def trim_history(self, before: str) -> int:
+        """Drop the description of roles that closed before `before` (an ISO date). The row stays: title, dates and link are
+        small and still useful, while the description is most of the size of the database. Returns the roles trimmed."""
+        cur = self.conn.execute("UPDATE jobs SET description='', exp_mentions='[]' WHERE active=0 AND COALESCE(closed_at, last_seen, '') < ? "
+                                "AND (description != '' OR exp_mentions != '[]')", (before,))
+        self.conn.commit()
+        return cur.rowcount
 
     def jobs_for(self, company_id: int, active_only: bool = True) -> list[dict]:
         q = "SELECT * FROM jobs WHERE company_id=?" + (" AND active=1" if active_only else "") + " ORDER BY first_seen DESC, title"

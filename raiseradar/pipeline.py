@@ -283,19 +283,24 @@ class Pipeline:
 
         totals = {"companies_with_jobs": 0, "jobs_active": 0, "jobs_new": 0, "jobs_closed": 0, "boards_unreachable": 0}
         seen_at = now_iso()
+        hc = self.cfg["history"]
         for c, raws in self._parallel(work, todo):
             if raws is None:   # transient failure or board removed: keep what we know, do NOT close jobs
                 self.db.update_company(c["id"], jobs_status="unreachable")
                 totals["boards_unreachable"] += 1
                 continue
             jobs = [self.enrich_job(r, c["ats"], c["ats_slug"]) for r in raws if r.title]
-            new, _upd, closed = self.db.sync_jobs(c["id"], jobs, seen_at, first_fetch=c["jobs_fetched_at"] is None)
+            new, _upd, closed = self.db.sync_jobs(c["id"], jobs, seen_at, first_fetch=c["jobs_fetched_at"] is None,
+                                                  close_after=int(hc["close_after_fetches"]), mass_close_after=int(hc["mass_close_after_fetches"]))
             self.db.update_company(c["id"], jobs_fetched_at=seen_at, jobs_status="ok" if jobs else "empty")
             totals["companies_with_jobs"] += int(bool(jobs))
             totals["jobs_active"] += len(jobs)
             totals["jobs_new"] += new
             totals["jobs_closed"] += closed
             log.info("jobs     %-28s %3d open (%d new, %d closed)", c["name"], len(jobs), new, closed)
+        keep = int(hc["keep_closed_text_days"])
+        if keep > 0:
+            self.db.trim_history((datetime.now(timezone.utc) - timedelta(days=keep)).replace(microsecond=0).isoformat())
         return totals
 
     # ------------------------------------------------------------------ everything

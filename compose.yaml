@@ -15,6 +15,7 @@ services:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
       RAISERADAR_CONTACT: ${RAISERADAR_CONTACT:-}
+      RAISERADAR_TRACKER: "1"             # save your applications from the page: fine while the port above is localhost-only. Remove it if you publish the port to your network.
     volumes:
       - raiseradar-data:/app/data         # the database: keep it, it holds the AI work
       - raiseradar-reports:/app/reports

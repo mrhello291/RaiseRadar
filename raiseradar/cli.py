@@ -44,7 +44,7 @@ def cmd_run(args, cfg):
     except KeyboardInterrupt:      # everything finished so far is saved; show it and let the next run continue
         print("\nInterrupted. Building the report from what is saved so far; the next `run` continues where this one stopped.")
         stats = {"interrupted": True}
-    stats.update(write_report(p, public=True if getattr(args, "public", False) else None))
+    stats.update(write_report(p, public=True if getattr(args, "public", False) else None, tracker=getattr(args, "tracker", None)))
     stats["seconds"] = round(time.time() - t0)
     if p.llm:
         stats["llm_calls"], stats["llm_cache_hits"], stats["llm_models"] = p.llm.calls, p.llm.cache_hits, p.llm.model_used
@@ -92,7 +92,7 @@ def cmd_serve(args, cfg):
     full = 0 if args.no_schedule else (sc["full_every_hours"] if args.full_every is None else args.full_every)
     jobs = 0 if args.no_schedule else (sc["jobs_every_hours"] if args.jobs_every is None else args.jobs_every)
     serve(cfg, args.host or sc["host"], args.port if args.port is not None else sc["port"], full, jobs,
-          public=True if args.public else None)
+          public=True if args.public else None, tracker=args.tracker)
 
 
 def cmd_setup(args, cfg):
@@ -203,6 +203,108 @@ def cmd_list(args, cfg):
               f"open={c['open']:<3} fit={c['matched']:<3} {c['ats'] or '-':15} {c['board_url'] or c['careers_url'] or c['jobs_status'] or ''}")
 
 
+def _track_candidates(t, db, query: list[str], tracked_only: bool = False) -> list[tuple[str, dict]]:
+    """Everything the words could mean: already tracked entries first, then roles in the database."""
+    import re
+    from .tracker import find_jobs, norm_name_words
+    q = " ".join(query).strip()
+    if not q:
+        sys.exit("error: say which role (words from the company or title, an 8-character code, or #number for a tracked entry)")
+    apps = t.list()
+    if m := re.fullmatch(r"#(\d+)", q):
+        return [("app", a) for a in apps if a["id"] == int(m.group(1))]
+    words = norm_name_words(q)
+    tracked = [a for a in apps if q == a["job_key"] or q.lower() == a["code"]
+               or (words and all(w in (a["company"] + " " + a["title"]).lower() for w in words))]
+    seen = {a["job_key"] for a in tracked if a["job_key"]}
+    jobs = [] if (db is None or tracked_only) else [j for j in find_jobs(db, q) if j["key"] not in seen]
+    return [("app", a) for a in tracked] + [("job", j) for j in jobs]
+
+
+def _describe(kind: str, x: dict) -> str:
+    if kind == "app":
+        return f"  #{x['id']:<4} {x['status']:<12} {x['company']} - {x['title']}" + (f"  ({x['location']})" if x["location"] else "")
+    return f"  {x['code']}  {'open  ' if x['active'] else 'closed'}       {x['company']} - {x['title']}" + (f"  ({x['location']})" if x["location"] else "")
+
+
+def _track_pick(t, db, query: list[str], tracked_only: bool = False) -> tuple[str, dict]:
+    cands = _track_candidates(t, db, query, tracked_only)
+    if not cands:
+        sys.exit("error: nothing matches " + repr(" ".join(query)) + (" among your tracked roles" if tracked_only else
+                 ". Search by words from the company or title; the codes are shown in the expanded role in the report."))
+    if len(cands) > 1:
+        print("Several roles match. Repeat the command with one code (or #number), or more words:")
+        for kind, x in cands[:15]:
+            print(_describe(kind, x))
+        if len(cands) > 15:
+            print(f"  ... and {len(cands) - 15} more")
+        sys.exit(2)
+    return cands[0]
+
+
+def cmd_track(args, cfg):
+    """Keep track of roles you saved, applied to, or want to hide. Stored in data/applications.db, separate from the job cache."""
+    from . import tracker as tr
+    from .util import days_since
+    t = tr.Tracker(cfg.path("tracker", "path"))
+    path = cfg.path("general", "db_path")
+    db = DB(path) if path.is_file() else None
+    try:
+        sub = args.track_cmd
+        if sub == "set":
+            status = tr.parse_status(args.status)
+            kind, x = _track_pick(t, db, args.query)
+            if kind == "app":
+                a = t.set(app_id=x["id"], status=status, note=args.note, applied_at=args.date)
+            else:
+                a = t.set(job_key=x["key"], status=status, note=args.note, applied_at=args.date,
+                          meta={"company": x["company"], "title": x["title"], "location": x["location"], "url": x["url"]})
+            print(f"{tr.LABELS[a['status']]}: {a['company']} - {a['title']}  (#{a['id']})")
+        elif sub == "add":
+            a = t.add_manual(args.company, args.title, url=args.url or "", location=args.location or "", status=args.status,
+                             note=args.note or "", applied_at=args.date)
+            print(f"{tr.LABELS[a['status']]}: {a['company']} - {a['title']}  (#{a['id']})")
+        elif sub == "note":
+            kind, x = _track_pick(t, db, args.query, tracked_only=True)
+            a = t.set(app_id=x["id"], note=args.text)
+            print(f"Note saved for {a['company']} - {a['title']}")
+        elif sub == "rm":
+            kind, x = _track_pick(t, db, args.query, tracked_only=True)
+            t.delete(app_id=x["id"])
+            print(f"Removed {x['company']} - {x['title']} from your tracker")
+        elif sub == "show":
+            kind, x = _track_pick(t, db, args.query, tracked_only=True)
+            print(f"#{x['id']}  {x['company']} - {x['title']}\n  status: {tr.LABELS[x['status']]}" + (f"   applied: {x['applied_at']}" if x["applied_at"] else ""))
+            for k in ("location", "url", "note"):
+                if x[k]:
+                    print(f"  {k}: {x[k]}")
+            print("  history: " + " -> ".join(f"{tr.LABELS[e['status']]} {e['at'][:10]}" for e in x["events"]))
+        else:   # list
+            apps = tr.app_views(t, db) if db else [dict(a, key=a["job_key"], listing="unknown") for a in t.list()]
+            if args.status:
+                apps = [a for a in apps if a["status"] == tr.parse_status(args.status)]
+            elif not args.all:
+                apps = [a for a in apps if a["status"] != "ignored"]
+            if not apps:
+                print("Nothing tracked yet. Mark a role in the report, or: raiseradar track set applied <words from the company or title>")
+                return
+            order = {k: i for i, k in enumerate(["interviewing", "offer", "applied", "saved", "rejected", "ignored"])}
+            follow = float(cfg["tracker"]["follow_up_days"])
+            for a in sorted(apps, key=lambda a: (order[a["status"]], a["updated_at"])):
+                flags = []
+                if a["listing"] == "closed":
+                    flags.append("role no longer listed")
+                if tr.needs_follow_up(a, follow):
+                    flags.append(f"no news for {int(days_since(a['updated_at']))}d: follow up?")
+                when = f" applied {a['applied_at']}" if a["applied_at"] else ""
+                print(f"#{a['id']:<4} {tr.LABELS[a['status']]:<14} {a['company'][:26]:26} {a['title'][:44]:44}{when}" + (f"   [{'; '.join(flags)}]" if flags else ""))
+    except tr.TrackerError as exc:
+        sys.exit(f"error: {exc}")
+    finally:
+        if db:
+            db.close()
+
+
 def cmd_models(args, cfg):
     for m in list_free_models():
         print(f"{m['id']:55} ctx={m['context']:>8} json={'Y' if m['json'] else '-'} tools={'Y' if m['tools'] else '-'}")
@@ -269,7 +371,10 @@ def main(argv=None):
     sv.add_argument("--full-every", type=float, metavar="HOURS", help="full run (news + companies + jobs) every N hours (default 12; 0 = never)")
     sv.add_argument("--jobs-every", type=float, metavar="HOURS", help="jobs-only refresh every N hours (default 4; 0 = never)")
     sv.add_argument("--no-schedule", action="store_true", help="only show the report, never run anything")
-    sv.add_argument("--public", action="store_true", help="shorten job descriptions to excerpts and mark the page noindex")
+    sv.add_argument("--public", action="store_true", help="shorten job descriptions to excerpts and mark the page noindex (application tracking is always off)")
+    sv.add_argument("--tracker", dest="tracker", action="store_true", default=None,
+                    help="let the page save your applications even though the server is not limited to this computer (default: on only for localhost)")
+    sv.add_argument("--no-tracker", dest="tracker", action="store_false", help="never let the page save applications")
     sv.set_defaults(fn=cmd_serve)
     su = sub.add_parser("setup", help="check and store your OpenRouter API key in .env")
     su.add_argument("--replace", action="store_true", help="enter a new key even if one works")
@@ -303,6 +408,22 @@ def main(argv=None):
     a.add_argument("name"); a.add_argument("--website"); a.add_argument("--ats", help="greenhouse|lever|ashby|workable|smartrecruiters|recruitee")
     a.add_argument("--slug", help="board slug for --ats"); a.add_argument("--round"); a.add_argument("--amount"); a.add_argument("--source")
     a.set_defaults(fn=cmd_add)
+
+    tk = sub.add_parser("track", help="keep track of roles you saved, applied to, or want to hide (stored in data/applications.db)")
+    ts = tk.add_subparsers(dest="track_cmd", required=True)
+    x = ts.add_parser("set", help="set the status of a role: saved, applied, interviewing, offer, rejected, ignored")
+    x.add_argument("status"); x.add_argument("query", nargs="+", help="words from the company or title, an 8-character code, or #number")
+    x.add_argument("--note"); x.add_argument("--date", help="when you applied (YYYY-MM-DD); default today")
+    x = ts.add_parser("add", help="track a role that is not in the report (a referral, another job board)")
+    x.add_argument("--company", required=True); x.add_argument("--title", required=True)
+    x.add_argument("--url"); x.add_argument("--location"); x.add_argument("--note"); x.add_argument("--date")
+    x.add_argument("--status", default="applied")
+    x = ts.add_parser("list", help="show what you track")
+    x.add_argument("--status"); x.add_argument("--all", action="store_true", help="include roles marked not interested")
+    x = ts.add_parser("show", help="details and history of one tracked role"); x.add_argument("query", nargs="+")
+    x = ts.add_parser("note", help="set the note of a tracked role"); x.add_argument("--text", required=True); x.add_argument("query", nargs="+")
+    x = ts.add_parser("rm", help="stop tracking a role"); x.add_argument("query", nargs="+")
+    tk.set_defaults(fn=cmd_track)
 
     l = sub.add_parser("list", help="print the ranked companies"); l.add_argument("--top", type=int, default=40); l.set_defaults(fn=cmd_list)
     sub.add_parser("models", help="show currently free OpenRouter models").set_defaults(fn=cmd_models)

@@ -35,13 +35,17 @@ def job(i, title="Engineer"):
 def test_sync_jobs_tracks_new_updated_and_closed(db):
     cid, _ = db.upsert_company("Acme")
     assert db.sync_jobs(cid, [job(1), job(2)], "2026-10-01T00:00:00+00:00") == (2, 0, 0)
-    assert db.sync_jobs(cid, [job(2, "Senior Engineer"), job(3)], "2026-10-02T00:00:00+00:00") == (1, 1, 1)
+    # j1 is missing once: still open (a board can glitch for one request)
+    assert db.sync_jobs(cid, [job(2, "Senior Engineer"), job(3)], "2026-10-02T00:00:00+00:00") == (1, 1, 0)
+    assert {j["id"] for j in db.jobs_for(cid)} == {"j1", "j2", "j3"}
+    # missing twice in a row: closed
+    assert db.sync_jobs(cid, [job(2, "Senior Engineer"), job(3)], "2026-10-03T00:00:00+00:00") == (0, 2, 1)
     active = {j["id"]: j for j in db.jobs_for(cid)}
     assert set(active) == {"j2", "j3"} and active["j2"]["title"] == "Senior Engineer"
     assert active["j2"]["first_seen"].startswith("2026-10-01")       # first_seen survives updates
     assert len(db.jobs_for(cid, active_only=False)) == 3
-    assert db.sync_jobs(cid, [job(1)], "2026-10-03T00:00:00+00:00")[0] == 0    # reopened job is not "new"
-    assert {j["id"] for j in db.jobs_for(cid)} == {"j1"}
+    assert db.sync_jobs(cid, [job(1)], "2026-10-04T00:00:00+00:00")[0] == 0    # reopened job is not "new"
+    assert {j["id"] for j in db.jobs_for(cid)} == {"j1", "j2", "j3"}           # j2, j3 have each missed once so far
 
 
 def test_articles_and_cache(db):

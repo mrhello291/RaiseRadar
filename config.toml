@@ -1,0 +1,88 @@
+# CompanyFinder configuration. Every key is optional; defaults live in companyfinder/config.py.
+
+[general]
+db_path = "data/companyfinder.db"
+report_dir = "reports"
+# Only companies funded within this many days (or from YC / your watchlist) are processed.
+recent_days = 150
+# A job/company counts as NEW in the report if first seen within this many days.
+new_days = 3
+# Contact string put in the User-Agent (SEC and some sites ask for one).
+contact = "umbrellalulli@gmail.com"
+
+[funding]
+# Which rounds are interesting. Others are still stored but not pursued.
+target_rounds = ["Series B", "Series C"]
+# Ignore rounds smaller than this (USD millions) when the amount is known. 0 = no limit.
+min_amount_usd_m = 0
+max_amount_usd_m = 0
+
+[news]
+lookback_days = 14
+# Google News editions to query (English editions only). Format: "country:ceid-country:language"
+editions = ["US:US:en", "GB:GB:en", "IN:IN:en", "SG:SG:en", "AU:AU:en", "CA:CA:en", "IE:IE:en", "ZA:ZA:en", "NG:NG:en"]
+# Extra RSS feeds (full URLs). Failing feeds are skipped, not fatal.
+extra_feeds = [
+  "https://techcrunch.com/category/venture/feed/",
+  "https://sifted.eu/feed",
+  "https://tech.eu/feed/",
+  "https://techfundingnews.com/feed/",
+  "https://news.crunchbase.com/feed/",
+  "https://inc42.com/buzz/feed/",
+  "https://yourstory.com/feed",
+  "https://economictimes.indiatimes.com/tech/startups/rssfeeds/78570561.cms",
+  "https://www.techinasia.com/feed",
+  "https://techcabal.com/feed/",
+  "https://www.startupdaily.net/feed/",
+]
+# Only send an article to the LLM if its title/summary mentions one of the target rounds.
+# Turn off to also catch "X raises $40M" headlines that never name the round (uses more LLM calls).
+require_round_keyword = true
+
+[yc]
+enabled = true
+# YC companies that are marked as hiring; filtered to likely-later-stage ones.
+min_team_size = 25
+max_team_size = 800
+# Skip batches newer than this year (young companies are rarely Series B/C yet). 0 = no limit.
+max_batch_year = 2023
+max_companies = 120
+
+[llm]
+# Get a free key at https://openrouter.ai/keys and put OPENROUTER_API_KEY in .env
+# Models are tried in order; if one is rate-limited/unavailable the next is used.
+# You can override this list from .env with OPENROUTER_MODEL=a,b,c
+# Free models change often: run `companyfinder models` to see what is currently free.
+models = [
+  "nvidia/nemotron-3-ultra-550b-a55b:free",   # scored 8/8 on `bench` (slow: ~80s per call)
+  "google/gemma-4-31b-it:free",               # often rate-limited on the free tier
+  "google/gemma-4-26b-a4b-it:free",
+  "openrouter/free",
+]
+batch_size = 10          # articles per LLM call
+max_tokens = 8000        # output budget per call; reasoning models spend much of it thinking
+reasoning_effort = "low" # speeds up reasoning models; dropped automatically if a model rejects it. "" = off
+max_calls_per_run = 30   # free tier is limited (about 20 req/min, ~50 req/day without credits)
+requests_per_minute = 12
+
+[http]
+timeout = 15
+min_delay_per_host = 0.3
+respect_robots = true
+workers = 8
+
+[jobs]
+max_jobs_per_company = 300
+# Re-run careers/ATS discovery for a company at most this often (days).
+rediscover_days = 14
+
+[profile]
+# Used to flag jobs that fit you ("matches profile"). Nothing is hidden by default; the report just lets you filter.
+# Regexes matched against the job title. Empty list = every job matches.
+roles = []                       # e.g. ["backend", "full.?stack", "data engineer", "machine learning"]
+exclude_titles = []              # e.g. ["intern", "director", "\\bvp\\b"]
+# Required years of experience must be <= this. Jobs with unknown experience are kept. Comment out for no limit.
+# max_experience_years = 4
+# Substrings looked up in the job location, e.g. ["remote", "india", "london"]. Empty list = any location.
+# "remote" also matches jobs flagged as remote.
+locations = []

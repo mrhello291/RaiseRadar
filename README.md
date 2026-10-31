@@ -54,6 +54,7 @@ Times are for one run on a normal connection. "Measured" means timed on this pro
 | `setup [--check] [--replace]` | check your OpenRouter key and store it in `.env` (`--check` only tests the current one) | a few seconds |
 | `run [--open] [--public]` | the whole pipeline, then rebuilds the report (`--skip-news`, `--skip-yc`, `--limit N` for quick tests; `--open` shows the page when done; `--public` see [Report for a public website](#report-for-a-public-website)) | **first run ~30 minutes**; later runs a few minutes; `--skip-news` much shorter |
 | `discover` / `resolve` / `careers` / `jobs` | run one stage on its own (`--limit N`; `resolve`/`careers` take `--force`) | `discover` is the slow, LLM-bound one; the others depend on how many companies are new |
+| `serve [--host H] [--port P] [--full-every HOURS] [--jobs-every HOURS] [--no-schedule] [--public]` | a web page for the report that refreshes itself on a schedule (default: full run every 12 hours, jobs every 4); this is what the Docker image runs | starts at once; the runs inside it take as long as `run` |
 | `report [--open] [--public]` | rebuild the page, CSV and JSON from the database, no network | about 0.5 seconds with 155 companies / ~3,000 roles (measured) |
 | `add "Acme" --website acme.com --round "Series B"` | add or correct a company by hand (also `--ats lever --slug acme` to force a job board) | instant; its jobs arrive on the next `run` |
 | `resolve --recheck` | re-grade websites that were auto-matched earlier (YC / hand-added ones are never touched) | minutes (one page fetch per company) |
@@ -84,6 +85,33 @@ Things to know:
 
 A report on your own computer shows the full job descriptions. A public website should not republish the employers' text, so `--public` (or `[report] public = true` in `config.toml`) keeps only the first `jd_excerpt_chars` characters of each description, links to the full posting, and marks the page `noindex` so search engines skip it. The GitHub Pages workflow uses it. Everything else (roles, experience, pay, filters) is unchanged.
 
+## Run it with Docker (always-on page)
+
+For a computer or VM that stays on: one container shows the report on port 8080 and refreshes it by itself, no cron needed.
+
+```bash
+git clone https://github.com/mrhello291/RaiseRadar && cd RaiseRadar
+echo "OPENROUTER_API_KEY=sk-or-..." > .env      # a free key from https://openrouter.ai/keys (optional, see below)
+docker compose up -d
+```
+
+Open http://localhost:8080. Until the first real run finishes (about 30 minutes) the page shows the sample report. Watch progress with `docker compose logs -f`.
+
+Without cloning, using the published image:
+
+```bash
+docker run -d --name raiseradar --restart unless-stopped -p 127.0.0.1:8080:8080 \
+  -e OPENROUTER_API_KEY=sk-or-... \
+  -v raiseradar-data:/app/data -v raiseradar-reports:/app/reports \
+  ghcr.io/mrhello291/raiseradar:latest
+```
+
+- **Schedule:** a full run every 12 hours and a jobs-only refresh every 4 (change them in `config.toml` under `[serve]`, and mount your file by uncommenting the line in `compose.yaml`). A run that was interrupted (for example by `docker stop`) continues where it stopped.
+- **Your data lives in two Docker volumes** (`docker volume ls`): the database (keep it, it holds the AI work) and the report files. Update with `docker compose pull && docker compose up -d`; the volumes stay.
+- **No key:** you still get real Y Combinator companies and their open roles, but no funding news.
+- **There is no login.** The compose file publishes the port to this computer only (`127.0.0.1`). To let other people see it, put it behind a reverse proxy with a password, or at least add `[report] public = true` to your `config.toml` so job descriptions are shortened (see [Report for a public website](#report-for-a-public-website)).
+- The image runs as a normal user, contains no key or data (those come from `.env` and the volumes), and is built for amd64 and arm64.
+
 ## The report (`reports/index.html`)
 
 Per company: round, amount, **investors** (and who led), **when** announced, **where it was found** (each publisher, linked), website, **hiring page link**, ATS used. Per open role: title, department, location, **work mode** (Remote / Hybrid / On-site), employment type, **required experience** (with the exact sentence it came from), level, pay when published, posting date, and the **full JD**.
@@ -102,6 +130,7 @@ Also written: `companies.csv`, `jobs.csv`, `data.json`, and `digest.md` (what is
 
 - `.env`: `OPENROUTER_API_KEY`, optionally `RAISERADAR_CONTACT`, and optionally `OPENROUTER_MODEL=a,b,c` (comma-separated, first preferred, rest are fallbacks) which overrides `[llm] models`.
 - `[general]`: `db_path`, `report_dir`, `recent_days` (only companies funded within this window are processed), `new_days` (how long something counts as NEW), `contact` (put in the User-Agent; or set `RAISERADAR_CONTACT` in `.env` to keep your address out of git).
+- `[serve]`: `host` (127.0.0.1), `port` (8080), `full_every_hours` (12), `jobs_every_hours` (4); 0 turns a schedule off.
 - `[report]`: `public` (default false; same as `--public`), `jd_excerpt_chars` (700; how much of each job description a public report keeps).
 - `[funding]`: `target_rounds` (add `"Series D"` etc.), `min/max_amount_usd_m`.
 - `[news]`: Google News editions (regions), extra RSS feeds, `lookback_days`. `require_round_keyword=false` also catches "X raises $40M" headlines that never name the round (more LLM calls).
@@ -121,6 +150,8 @@ Funding news changes slowly and needs the LLM; job postings change faster and ne
 # jobs-only refresh: every 4 hours, no LLM, no news requests
 0 */4 * * *    /path/to/RaiseRadar/scripts/refresh_jobs.sh
 ```
+
+Prefer not to use cron? `raiseradar serve` (or the Docker image) does this scheduling itself.
 
 `refresh_jobs.sh` re-fetches the job lists of companies you already track and rebuilds the report. It does not look for new companies, so the full run is still needed for those. Logs go to `data/run.log`.
 
@@ -160,7 +191,7 @@ Free OpenRouter limits are small (roughly 20 requests/min and a low daily cap wi
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest -q        # ~181 offline tests (under 1 second): mocked LLM + mocked internet, full pipeline included
+.venv/bin/python -m pytest -q        # ~190 offline tests (under 1 second): mocked LLM + mocked internet, full pipeline included
 ```
 
 ## Adding an ATS

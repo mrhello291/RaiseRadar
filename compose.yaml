@@ -1,0 +1,26 @@
+# Keep RaiseRadar running and look at the page any time:
+#   1. put OPENROUTER_API_KEY=sk-or-...  in a file named .env next to this file (a free key: https://openrouter.ai/keys)
+#   2. docker compose up -d
+#   3. open http://localhost:8080
+# The first real run takes about 30 minutes; until then the page shows the sample report. Logs: docker compose logs -f
+# Without a key you still get real Y Combinator companies and their open roles, but no funding news.
+services:
+  raiseradar:
+    image: ghcr.io/mrhello291/raiseradar:latest
+    build: .                              # used when the image above cannot be pulled
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"             # this computer only. "8080:8080" lets your network in; there is no login.
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-}
+      RAISERADAR_CONTACT: ${RAISERADAR_CONTACT:-}
+    volumes:
+      - raiseradar-data:/app/data         # the database: keep it, it holds the AI work
+      - raiseradar-reports:/app/reports
+      # - ./config.toml:/app/config.toml:ro   # your own settings (profile, rounds, regions, [serve] schedule, [report] public)
+    stop_grace_period: 30s
+
+volumes:
+  raiseradar-data:
+  raiseradar-reports:

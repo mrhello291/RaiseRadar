@@ -20,6 +20,12 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "public": False,
         "jd_excerpt_chars": 700,
     },
+    "serve": {
+        "host": "127.0.0.1",
+        "port": 8080,
+        "full_every_hours": 12,
+        "jobs_every_hours": 4,
+    },
     "funding": {
         "target_rounds": ["Series B", "Series C"],
         "min_amount_usd_m": 0,

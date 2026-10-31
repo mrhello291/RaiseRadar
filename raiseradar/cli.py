@@ -85,6 +85,16 @@ def cmd_demo(args, cfg):
         print("Add --open to open it in your browser. For real companies: `raiseradar setup`, then `raiseradar run`.")
 
 
+def cmd_serve(args, cfg):
+    """Serve the report on a web page and refresh it on a schedule (for Docker, or a machine that stays on)."""
+    from .serve import serve
+    sc = cfg["serve"]
+    full = 0 if args.no_schedule else (sc["full_every_hours"] if args.full_every is None else args.full_every)
+    jobs = 0 if args.no_schedule else (sc["jobs_every_hours"] if args.jobs_every is None else args.jobs_every)
+    serve(cfg, args.host or sc["host"], args.port if args.port is not None else sc["port"], full, jobs,
+          public=True if args.public else None)
+
+
 def cmd_setup(args, cfg):
     """Check/store your OpenRouter key in .env."""
     if not interactive() and not args.check:
@@ -253,6 +263,14 @@ def main(argv=None):
     dm.add_argument("--out", help="folder for the sample report (default: <report_dir>/demo)")
     dm.add_argument("--open", action="store_true", help="open it in your browser")
     dm.set_defaults(fn=cmd_demo)
+    sv = sub.add_parser("serve", help="show the report on a web page and refresh it on a schedule (for Docker or a machine that stays on)")
+    sv.add_argument("--host", help="address to listen on (default 127.0.0.1, this computer only; 0.0.0.0 = everyone who can reach it)")
+    sv.add_argument("--port", type=int, help="port (default 8080)")
+    sv.add_argument("--full-every", type=float, metavar="HOURS", help="full run (news + companies + jobs) every N hours (default 12; 0 = never)")
+    sv.add_argument("--jobs-every", type=float, metavar="HOURS", help="jobs-only refresh every N hours (default 4; 0 = never)")
+    sv.add_argument("--no-schedule", action="store_true", help="only show the report, never run anything")
+    sv.add_argument("--public", action="store_true", help="shorten job descriptions to excerpts and mark the page noindex")
+    sv.set_defaults(fn=cmd_serve)
     su = sub.add_parser("setup", help="check and store your OpenRouter API key in .env")
     su.add_argument("--replace", action="store_true", help="enter a new key even if one works")
     su.add_argument("--check", action="store_true", help="only check the key that is configured")

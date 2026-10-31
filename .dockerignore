@@ -1,0 +1,20 @@
+# Never copy secrets or local data into an image
+.env
+.env.*
+data
+reports
+
+# Not needed to run
+.git
+.github
+.venv
+.pytest_cache
+__pycache__
+*.pyc
+*.egg-info
+tests
+docs
+scripts
+Dockerfile
+compose.yaml
+.dockerignore

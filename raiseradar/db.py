@@ -292,6 +292,11 @@ class DB:
         self.conn.execute("UPDATE runs SET finished_at=?, stats=? WHERE id=?", (now_iso(), json.dumps(stats), run_id))
         self.conn.commit()
 
+    def last_finished_run_started(self) -> str | None:
+        """When the most recent run that completed (or was interrupted cleanly) started; a run that was killed does not count."""
+        r = self.conn.execute("SELECT started_at FROM runs WHERE finished_at IS NOT NULL ORDER BY id DESC LIMIT 1").fetchone()
+        return r[0] if r else None
+
     def last_run_started(self, before_id: int | None = None) -> str | None:
         q = "SELECT started_at FROM runs" + (" WHERE id<?" if before_id else "") + " ORDER BY id DESC LIMIT 1"
         r = self.conn.execute(q, (before_id,) if before_id else ()).fetchone()

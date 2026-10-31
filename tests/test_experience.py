@@ -1,6 +1,6 @@
 import pytest
 
-from companyfinder.experience import (extract_experience, find_salary, infer_from_title, infer_workplace, level_to_years,
+from raiseradar.experience import (extract_experience, find_salary, infer_from_title, infer_workplace, level_to_years,
                                       role_family, seniority_of)
 
 

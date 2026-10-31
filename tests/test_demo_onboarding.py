@@ -9,10 +9,10 @@ from pathlib import Path
 import httpx
 import pytest
 
-from companyfinder import cli, demo, onboarding
-from companyfinder.db import DB
-from companyfinder.experience import extract_experience, infer_from_title, seniority_of
-from companyfinder.report import _job_is_new
+from raiseradar import cli, demo, onboarding
+from raiseradar.db import DB
+from raiseradar.experience import extract_experience, infer_from_title, seniority_of
+from raiseradar.report import _job_is_new
 
 
 # --------------------------------------------------------------------------- demo
@@ -63,9 +63,9 @@ def test_write_demo_touches_only_its_folder(tmp_path, monkeypatch):
 
 
 def test_real_reports_are_not_marked_as_demo(tmp_path):
-    from companyfinder.config import Config
-    from companyfinder.pipeline import Pipeline
-    from companyfinder.report import build_data
+    from raiseradar.config import Config
+    from raiseradar.pipeline import Pipeline
+    from raiseradar.report import build_data
     p = Pipeline(Config(), DB(":memory:"), None, None)
     assert build_data(p)["demo"] is False
 
@@ -85,9 +85,9 @@ def test_cli_demo_writes_to_report_dir_demo(tmp_path, capsys):
 def test_start_without_a_terminal_shows_demo_and_instructions(tmp_path, capsys, monkeypatch):
     monkeypatch.setattr(onboarding, "interactive", lambda: False)
     monkeypatch.setattr(cli, "interactive", lambda: False)
-    cli.main(["-c", _cfg_dir(tmp_path)])                                        # plain `companyfinder`
+    cli.main(["-c", _cfg_dir(tmp_path)])                                        # plain `raiseradar`
     out = capsys.readouterr().out
-    assert "sample report" in out and "companyfinder setup" in out and "about 30 minutes" in out
+    assert "sample report" in out and "raiseradar setup" in out and "about 30 minutes" in out
     assert (tmp_path / "reports" / "demo" / "index.html").is_file()
 
 
@@ -197,7 +197,7 @@ def test_setup_command_refuses_without_a_terminal(tmp_path, monkeypatch):
 
 # --------------------------------------------------------------------------- Ctrl-C / first-run notice
 def test_ctrl_c_still_writes_a_report(tmp_path, capsys, monkeypatch):
-    from companyfinder.pipeline import Pipeline
+    from raiseradar.pipeline import Pipeline
     monkeypatch.setattr(Pipeline, "run_all", lambda self, **k: (_ for _ in ()).throw(KeyboardInterrupt()))
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     cli.main(["-c", _cfg_dir(tmp_path), "run"])
@@ -207,7 +207,7 @@ def test_ctrl_c_still_writes_a_report(tmp_path, capsys, monkeypatch):
 
 
 def test_open_flag_opens_only_from_a_terminal(tmp_path, capsys, monkeypatch):
-    from companyfinder.pipeline import Pipeline
+    from raiseradar.pipeline import Pipeline
     monkeypatch.setattr(Pipeline, "run_all", lambda self, **k: {})
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     opened = []
@@ -238,7 +238,7 @@ def _job(**kw):
 
 
 def test_new_uses_the_board_date_when_there_is_one():
-    from companyfinder.util import now_iso
+    from raiseradar.util import now_iso
     from datetime import datetime, timedelta, timezone
     ago = lambda d: (datetime.now(timezone.utc) - timedelta(days=d)).isoformat()
     assert _job_is_new(_job(posted_at=ago(1), first_seen=ago(1), baseline=1), 3)          # posted yesterday: new even on the first fetch

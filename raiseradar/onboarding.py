@@ -90,7 +90,7 @@ def setup_key(env_path: Path, *, current: str = "", replace: bool = False, trans
     for attempt in range(3):
         key = key_reader("Paste the key here (input is hidden; press Enter to skip): ")
         if not key:
-            say("Skipped. Run `companyfinder setup` whenever you have a key.")
+            say("Skipped. Run `raiseradar setup` whenever you have a key.")
             return False
         status, detail = check_api_key(key, transport)
         if status == "invalid":

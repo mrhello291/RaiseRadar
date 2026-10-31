@@ -1,8 +1,8 @@
 import httpx
 import pytest
 
-from companyfinder.db import DB
-from companyfinder.http import Fetcher
+from raiseradar.db import DB
+from raiseradar.http import Fetcher
 
 
 @pytest.fixture

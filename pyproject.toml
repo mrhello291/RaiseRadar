@@ -1,8 +1,10 @@
 [project]
-name = "companyfinder"
+name = "raiseradar"
 version = "0.1.0"
 description = "Track recent Series B/C funding rounds and find which of those startups are hiring"
 requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
   "httpx>=0.27",
   "feedparser>=6.0",
@@ -13,14 +15,14 @@ dependencies = [
 dev = ["pytest>=8"]
 
 [project.scripts]
-companyfinder = "companyfinder.cli:main"
+raiseradar = "raiseradar.cli:main"
 
 [build-system]
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["companyfinder*"]
+include = ["raiseradar*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

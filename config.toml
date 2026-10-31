@@ -1,4 +1,4 @@
-# CompanyFinder configuration. Every key is optional; defaults live in companyfinder/config.py.
+# RaiseRadar configuration. Every key is optional; defaults live in raiseradar/config.py.
 
 [general]
 db_path = "data/companyfinder.db"
@@ -7,8 +7,9 @@ report_dir = "reports"
 recent_days = 150
 # A job/company counts as NEW in the report if first seen within this many days.
 new_days = 3
-# Contact string put in the User-Agent (SEC and some sites ask for one).
-contact = "umbrellalulli@gmail.com"
+# Contact string put in the User-Agent (some sites ask for one). Leave empty to send none, or keep your own
+# address out of git by putting RAISERADAR_CONTACT=you@example.com in .env instead.
+contact = ""
 
 [funding]
 # Which rounds are interesting. Others are still stored but not pursued.
@@ -52,7 +53,7 @@ max_companies = 120
 # Get a free key at https://openrouter.ai/keys and put OPENROUTER_API_KEY in .env
 # Models are tried in order; if one is rate-limited/unavailable the next is used.
 # You can override this list from .env with OPENROUTER_MODEL=a,b,c
-# Free models change often: run `companyfinder models` to see what is currently free.
+# Free models change often: run `raiseradar models` to see what is currently free.
 models = [
   "nvidia/nemotron-3-ultra-550b-a55b:free",   # scored 8/8 on `bench` (slow: ~80s per call)
   "google/gemma-4-31b-it:free",               # often rate-limited on the free tier

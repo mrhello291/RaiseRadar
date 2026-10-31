@@ -1,4 +1,4 @@
-# CompanyFinder
+# RaiseRadar
 
 Finds startups that **recently raised a Series B/C** (anywhere in the world), works out **whether they are hiring**, and lists every open role with **required experience, work mode, level, location, pay and the full job description**. Runs on a schedule; results land in a searchable, filterable HTML page.
 
@@ -17,7 +17,7 @@ Finds startups that **recently raised a Series B/C** (anywhere in the world), wo
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'
-.venv/bin/companyfinder demo --open
+.venv/bin/raiseradar demo --open
 ```
 
 This builds a report from **made-up companies** (clearly marked "Sample data" on the page) so you can click through every filter before deciding to run the real thing. It goes through the same code as real data, touches nothing of yours, and every link in it points at example.com.
@@ -26,22 +26,22 @@ This builds a report from **made-up companies** (clearly marked "Sample data" on
 
 ## Get real data
 
-The guided way: run `.venv/bin/companyfinder` with no arguments. It shows the sample report, helps you paste a free OpenRouter key (https://openrouter.ai/keys; checked with OpenRouter, stored only in `.env`, readable only by you), and offers to start the first real run.
+The guided way: run `.venv/bin/raiseradar` with no arguments. It shows the sample report, helps you paste a free OpenRouter key (https://openrouter.ai/keys; checked with OpenRouter, stored only in `.env`, readable only by you), and offers to start the first real run.
 
 By hand:
 
 ```bash
-.venv/bin/companyfinder setup     # paste your key (or put OPENROUTER_API_KEY=... in .env yourself)
-.venv/bin/companyfinder run       # first run: about 30 minutes
+.venv/bin/raiseradar setup     # paste your key (or put OPENROUTER_API_KEY=... in .env yourself)
+.venv/bin/raiseradar run       # first run: about 30 minutes
 # add --open to `run` (or `report`) to open the page when it finishes, or:
 xdg-open reports/index.html       # macOS: open
 ```
 
 **The first real run takes about 30 minutes.** Free AI models take 1-3 minutes per call and the first run has a backlog of ~180 headlines; every company's website and job board is also checked once. You can press Ctrl-C at any time: what is finished is saved, a report is written from it, and the next run continues where this one stopped. Later runs only read new headlines and take a few minutes. If the free daily limit is hit, the unread headlines simply wait for the next run.
 
-**No key, or don't want to wait?** `companyfinder run --skip-news` skips the funding news and shows real Y Combinator companies with their open roles (much faster). Companies you `add` are always processed. News headlines stay queued until you add a key.
+**No key, or don't want to wait?** `raiseradar run --skip-news` skips the funding news and shows real Y Combinator companies with their open roles (much faster). Companies you `add` are always processed. News headlines stay queued until you add a key.
 
-`companyfinder bench` (optional) checks which free model works best right now.
+`raiseradar bench` (optional) checks which free model works best right now.
 
 ## Commands
 
@@ -79,8 +79,8 @@ Also written: `companies.csv`, `jobs.csv`, `data.json`, and `digest.md` (what is
 
 `config.toml` (every key is optional) and `.env`:
 
-- `.env`: `OPENROUTER_API_KEY`, and optionally `OPENROUTER_MODEL=a,b,c` (comma-separated, first preferred, rest are fallbacks) which overrides `[llm] models`.
-- `[general]`: `db_path`, `report_dir`, `recent_days` (only companies funded within this window are processed), `new_days` (how long something counts as NEW), `contact` (put in the User-Agent).
+- `.env`: `OPENROUTER_API_KEY`, optionally `RAISERADAR_CONTACT`, and optionally `OPENROUTER_MODEL=a,b,c` (comma-separated, first preferred, rest are fallbacks) which overrides `[llm] models`.
+- `[general]`: `db_path`, `report_dir`, `recent_days` (only companies funded within this window are processed), `new_days` (how long something counts as NEW), `contact` (put in the User-Agent; or set `RAISERADAR_CONTACT` in `.env` to keep your address out of git).
 - `[funding]`: `target_rounds` (add `"Series D"` etc.), `min/max_amount_usd_m`.
 - `[news]`: Google News editions (regions), extra RSS feeds, `lookback_days`. `require_round_keyword=false` also catches "X raises $40M" headlines that never name the round (more LLM calls).
 - `[yc]`: which YC companies to include (team size, batch year, cap).
@@ -95,9 +95,9 @@ Funding news changes slowly and needs the LLM; job postings change faster and ne
 
 ```cron
 # full run (news + new companies + jobs): twice a day
-30 7,19 * * *  /path/to/CompanyFinder/scripts/run_daily.sh
+30 7,19 * * *  /path/to/RaiseRadar/scripts/run_daily.sh
 # jobs-only refresh: every 4 hours, no LLM, no news requests
-0 */4 * * *    /path/to/CompanyFinder/scripts/refresh_jobs.sh
+0 */4 * * *    /path/to/RaiseRadar/scripts/refresh_jobs.sh
 ```
 
 `refresh_jobs.sh` re-fetches the job lists of companies you already track and rebuilds the report. It does not look for new companies, so the full run is still needed for those. Logs go to `data/run.log`.
@@ -130,7 +130,7 @@ Free OpenRouter limits are small (roughly 20 requests/min and a low daily cap wi
 
 ## Troubleshooting
 
-- **No funding items / LLM warnings in the log**: see `data/llm_failures.jsonl` (raw text of unusable replies, with model and finish reason). Try `companyfinder models`, then `bench`, then set `OPENROUTER_MODEL`. "rate limited" is the free tier pushing back; the next model in the chain is tried automatically.
+- **No funding items / LLM warnings in the log**: see `data/llm_failures.jsonl` (raw text of unusable replies, with model and finish reason). Try `raiseradar models`, then `bench`, then set `OPENROUTER_MODEL`. "rate limited" is the free tier pushing back; the next model in the chain is tried automatically.
 - **A company shows the wrong jobs**: its website was probably a namesake. Check the ⚠ badge, then `add "Name" --website the-right-site.com`.
 - **A company shows no jobs**: the badge says why (e.g. "no careers page found", "uses workday (not supported yet)", "homepage unreachable"). Open its hiring page link; if it is a board we support but could not detect, force it: `add "Name" --ats greenhouse --slug the-slug`.
 - **Start fresh**: delete `data/` (this also throws away the LLM work).
@@ -143,4 +143,14 @@ Free OpenRouter limits are small (roughly 20 requests/min and a low daily cap wi
 
 ## Adding an ATS
 
-Create `companyfinder/ats/<name>.py` with `board_url(slug)`, `parse(...)` and `fetch(fetcher, slug, max_jobs) -> list[RawJob] | None`, register it in `ats/__init__.py` (`ADAPTERS` + a URL pattern in `SUPPORTED_PATTERNS`, and remove it from `UNSUPPORTED_PATTERNS` if listed there), and add a parse test.
+Create `raiseradar/ats/<name>.py` with `board_url(slug)`, `parse(...)` and `fetch(fetcher, slug, max_jobs) -> list[RawJob] | None`, register it in `ats/__init__.py` (`ADAPTERS` + a URL pattern in `SUPPORTED_PATTERNS`, and remove it from `UNSUPPORTED_PATTERNS` if listed there), and add a parse test.
+
+## License and disclaimer
+
+MIT licensed (see `LICENSE`). Free to use, change and share.
+
+- **Not affiliated** with Y Combinator, OpenRouter, Google, or any company or job board named here or shown in a report. Names are used only to say where data comes from.
+- **Data can be wrong.** Funding details are read from headlines by a free AI model, websites are matched by name, and experience and level are guessed from text. Check anything that matters at the company's own page before you act on it.
+- **Public sources only.** Funding news comes from Google News RSS feeds (headline, link, publisher only), job lists from the public job-board APIs that companies publish for this purpose, and company sites are fetched lightly with `robots.txt` honoured. There is no scraping of LinkedIn, Crunchbase or Wellfound, and none is planned.
+- **Job descriptions belong to the employers who wrote them.** A personal copy on your own computer is fine. If you publish a report on a public website, show an excerpt and link to the original posting instead of the full text, and check the terms of the services you use first (Google News, OpenRouter, each job board).
+- The sample report uses made-up companies; any resemblance to real ones is a coincidence.

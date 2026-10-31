@@ -70,8 +70,8 @@ class Config:
 
     @property
     def user_agent(self) -> str:
-        contact = self.data["general"].get("contact") or "personal-use"
-        return f"Mozilla/5.0 (compatible; CompanyFinder/0.1; +{contact})"
+        contact = os.environ.get("RAISERADAR_CONTACT", "").strip() or self.data["general"].get("contact") or "personal-use"
+        return f"Mozilla/5.0 (compatible; RaiseRadar/0.1; +{contact})"
 
 
 def load_dotenv(path: Path) -> None:

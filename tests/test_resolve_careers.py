@@ -1,8 +1,8 @@
 import pytest
 
-from companyfinder import careers, resolve
-from companyfinder.models import RawJob
-from companyfinder.util import norm_name, slug_candidates
+from raiseradar import careers, resolve
+from raiseradar.models import RawJob
+from raiseradar.util import norm_name, slug_candidates
 from conftest import html_response, json_response, make_fetcher
 
 

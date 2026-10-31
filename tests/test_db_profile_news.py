@@ -1,8 +1,8 @@
-from companyfinder.db import DB
-from companyfinder.models import Article
-from companyfinder.profile import Profile, company_score
-from companyfinder.sources import news, yc
-from companyfinder.util import now_iso
+from raiseradar.db import DB
+from raiseradar.models import Article
+from raiseradar.profile import Profile, company_score
+from raiseradar.sources import news, yc
+from raiseradar.util import now_iso
 
 
 # ----------------------------------------------------------------------------- DB
@@ -134,7 +134,7 @@ def test_yc_selection_and_conversion():
 
 
 def test_env_model_overrides_config(tmp_path, monkeypatch):
-    from companyfinder.config import load_config
+    from raiseradar.config import load_config
     (tmp_path / "config.toml").write_text('[llm]\nmodels = ["a/x:free"]\n')
     monkeypatch.delenv("OPENROUTER_MODEL", raising=False)
     assert load_config(tmp_path / "config.toml")["llm"]["models"] == ["a/x:free"]
@@ -191,3 +191,14 @@ def test_failed_articles_are_not_treated_as_known(db):
     assert db.known_article_ids(["x1"]) == set() and db.article_attempts(["x1"]) == {"x1": 2}
     db.mark_article(a, False)
     assert db.known_article_ids(["x1"]) == {"x1"}
+
+
+def test_user_agent_contact(monkeypatch):
+    from raiseradar.config import Config
+    monkeypatch.delenv("RAISERADAR_CONTACT", raising=False)
+    cfg = Config()
+    assert "+personal-use" in cfg.user_agent and "@" not in cfg.user_agent      # blank contact sends no address
+    cfg.data["general"]["contact"] = "me@example.com"
+    assert "+me@example.com" in cfg.user_agent
+    monkeypatch.setenv("RAISERADAR_CONTACT", "env@example.com")                 # .env wins, so the address can stay out of git
+    assert "+env@example.com" in cfg.user_agent

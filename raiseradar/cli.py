@@ -1,4 +1,4 @@
-"""Command line interface:  python -m companyfinder <command>"""
+"""Command line interface:  python -m raiseradar <command>"""
 from __future__ import annotations
 
 import argparse
@@ -36,7 +36,7 @@ def cmd_run(args, cfg):
     p, db, f = build(cfg)
     if p.llm is None and not args.skip_news:
         print("Note: no OPENROUTER_API_KEY, so funding news will be skipped (Y Combinator companies and ones you `add` still work).\n"
-              "      Run `companyfinder setup` to add a free key.\n")
+              "      Run `raiseradar setup` to add a free key.\n")
     run_id = db.start_run()
     t0 = time.time()
     try:
@@ -82,7 +82,7 @@ def cmd_demo(args, cfg):
     if args.open:
         _open(page)
     else:
-        print("Add --open to open it in your browser. For real companies: `companyfinder setup`, then `companyfinder run`.")
+        print("Add --open to open it in your browser. For real companies: `raiseradar setup`, then `raiseradar run`.")
 
 
 def cmd_setup(args, cfg):
@@ -98,7 +98,7 @@ def cmd_setup(args, cfg):
         sys.exit(0 if status == "ok" else 1)
     ok = setup_key(cfg.root / ".env", current=cfg.openrouter_key, replace=args.replace)
     if ok:
-        print(f"\nNext: `companyfinder run`  (the first run takes {COLD_RUN}; later runs take a few minutes).")
+        print(f"\nNext: `raiseradar run`  (the first run takes {COLD_RUN}; later runs take a few minutes).")
 
 
 def _has_real_data(cfg) -> bool:
@@ -116,7 +116,7 @@ def cmd_start(args, cfg):
     """Guided first use: show the sample report, then (optionally) add a key and start a real run."""
     page = cfg.path("general", "report_dir") / "index.html"
     if _has_real_data(cfg):
-        print(f"You already have data. Your report: {page}\nRefresh it any time with: companyfinder run")
+        print(f"You already have data. Your report: {page}\nRefresh it any time with: raiseradar run")
         if args.open:
             _open(page)
         return
@@ -127,7 +127,7 @@ def cmd_start(args, cfg):
     if args.open and interactive():
         _open(demo_page)
     if not interactive():
-        print("For real companies: `companyfinder setup` (free OpenRouter key), then `companyfinder run`.\n"
+        print("For real companies: `raiseradar setup` (free OpenRouter key), then `raiseradar run`.\n"
               f"The first real run takes {COLD_RUN}; later runs take a few minutes.")
         return
     have_key = setup_key(cfg.root / ".env", current=cfg.openrouter_key)
@@ -139,7 +139,7 @@ def cmd_start(args, cfg):
     if args.yes or ask(question).lower().startswith("y"):
         cmd_run(run_args, cfg)
     else:
-        print("\nWhenever you are ready: `companyfinder run`" + ("" if have_key else "   (add a key first with `companyfinder setup` for funding news)"))
+        print("\nWhenever you are ready: `raiseradar run`" + ("" if have_key else "   (add a key first with `raiseradar setup` for funding news)"))
 
 
 def cmd_stage(args, cfg):
@@ -241,11 +241,11 @@ def cmd_bench(args, cfg):
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(prog="companyfinder", description="Find recently funded startups and what they are hiring for.")
+    ap = argparse.ArgumentParser(prog="raiseradar", description="Find recently funded startups and what they are hiring for.")
     ap.add_argument("-c", "--config", help="path to config.toml")
     ap.add_argument("-v", "--verbose", action="store_true")
     sub = ap.add_subparsers(dest="cmd")
-    st = sub.add_parser("start", help="guided first use (this is what plain `companyfinder` does): sample report, then add a key and run")
+    st = sub.add_parser("start", help="guided first use (this is what plain `raiseradar` does): sample report, then add a key and run")
     st.add_argument("--yes", action="store_true", help="start the real run without asking")
     st.add_argument("--no-open", dest="open", action="store_false", help="do not open the report in a browser")
     st.set_defaults(fn=cmd_start)
@@ -290,7 +290,7 @@ def main(argv=None):
     b.add_argument("models", nargs="*"); b.set_defaults(fn=cmd_bench)
 
     args = ap.parse_args(argv)
-    if args.cmd is None:    # plain `companyfinder`: the guided start
+    if args.cmd is None:    # plain `raiseradar`: the guided start
         args = ap.parse_args((["-c", args.config] if args.config else []) + (["-v"] if args.verbose else []) + ["start"])
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s", datefmt="%H:%M:%S")
     for noisy in ("httpx", "httpcore", "hpack"):

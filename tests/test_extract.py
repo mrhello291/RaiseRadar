@@ -3,10 +3,10 @@ import json
 import httpx
 import pytest
 
-from companyfinder.extract import (extract_funding, format_items, normalise_round, parse_response,
+from raiseradar.extract import (extract_funding, format_items, normalise_round, parse_response,
                                    round_keyword_regex)
-from companyfinder.llm import LLMClient
-from companyfinder.models import Article
+from raiseradar.llm import LLMClient
+from raiseradar.models import Article
 
 
 def art(i, title, pub="TechCrunch"):
@@ -86,7 +86,7 @@ def test_extract_funding_end_to_end_with_mock_llm():
 
 
 # --- shapes seen from real free models --------------------------------------------------------------------------
-from companyfinder.extract import salvage_items
+from raiseradar.extract import salvage_items
 
 
 def test_parse_response_accepts_other_wrappers():

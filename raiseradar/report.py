@@ -119,7 +119,7 @@ def write_csv(data: dict, out_dir: Path) -> None:
 
 
 def write_digest(data: dict, out_dir: Path) -> str:
-    lines = [f"# CompanyFinder digest ({data['generated_at'][:16].replace('T', ' ')} UTC)", ""]
+    lines = [f"# RaiseRadar digest ({data['generated_at'][:16].replace('T', ' ')} UTC)", ""]
     new_c = [c for c in data["companies"] if c["is_new"]]
     lines.append(f"## New companies ({len(new_c)})")
     for c in new_c[:40]:
@@ -154,7 +154,7 @@ def write_files(data: dict, out_dir: Path) -> dict:
 
 HTML = r"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CompanyFinder</title>
+<title>RaiseRadar</title>
 <style>
 :root{--onacc:#fff;--bg:#f6f7f9;--card:#fff;--ink:#16181d;--mut:#667085;--line:#e4e7ec;--acc:#3b5bdb;--acc2:#e7ecff;--ok:#0b7a43;--okbg:#e3f6ec;--warn:#9a5b00;--warnbg:#fff3d6}
 @media (prefers-color-scheme:dark){:root{--onacc:#0f1115;--bg:#0f1115;--card:#171a21;--ink:#e8eaee;--mut:#98a2b3;--line:#272b35;--acc:#8aa4ff;--acc2:#222a4a;--ok:#5fd39a;--okbg:#12301f;--warn:#f0b955;--warnbg:#35290f}}
@@ -188,11 +188,11 @@ button.reset{background:none;border:1px solid var(--line);color:var(--mut);borde
 .demo code{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:12px;white-space:nowrap}
 @media(max-width:700px){.hide-s{display:none}.bar{position:static}}
 </style></head><body>
-<header><h1>CompanyFinder</h1><div class="sub" id="sub"></div>
+<header><h1>RaiseRadar</h1><div class="sub" id="sub"></div>
 <div class="demo" id="demo" hidden><b>Sample data.</b> Every company, investor, news item and job on this page is made up, so you can try the filters.
-<br><b>To see real companies:</b> run <code>companyfinder setup</code> (paste a free OpenRouter key from openrouter.ai/keys), then <code>companyfinder run</code>.
+<br><b>To see real companies:</b> run <code>raiseradar setup</code> (paste a free OpenRouter key from openrouter.ai/keys), then <code>raiseradar run</code>.
 The first real run takes about <b>30 minutes</b> because free AI models are slow; later runs take a few minutes.
-No key? <code>companyfinder run --skip-news</code> still shows real Y Combinator companies and their open roles.</div></header>
+No key? <code>raiseradar run --skip-news</code> still shows real Y Combinator companies and their open roles.</div></header>
 <div class="bar">
 <div class="in">
 <input type="search" id="q" placeholder="Search company, job title, investor, country...">
@@ -228,7 +228,7 @@ const rounds = [...new Set(D.companies.flatMap(c => c.funding.map(f => f.round))
 rounds.forEach(r => $('round').append(h('option', { value: r, text: r })));
 [...new Set(D.companies.flatMap(c => c.jobs.map(j => j.family)))].sort().forEach(f => $('family').append(h('option', { value: f, text: f })));
 if (!D.profile.active) $('mine').parentElement.style.display = 'none';
-if (D.demo) { $('demo').hidden = false; document.title = 'CompanyFinder (sample data)'; if (D.demo.profile) $('demo').append(h('br'), h('span', { class: 'sub', text: D.demo.profile })); }
+if (D.demo) { $('demo').hidden = false; document.title = 'RaiseRadar (sample data)'; if (D.demo.profile) $('demo').append(h('br'), h('span', { class: 'sub', text: D.demo.profile })); }
 const ageDays = j => { const t = Date.parse(j.posted_at || j.seen_at || ''); return isNaN(t) ? null : (Date.now() - t) / 864e5; };
 const ageText = j => j.posted_at ? 'posted ' + ago(j.posted_at) : (j.seen_at ? 'noticed ' + ago(j.seen_at) : '');
 $('sub').textContent = `${D.companies.length} companies · ${D.companies.reduce((s, c) => s + c.open, 0)} open roles · generated ${ago(D.generated_at)} · ` +
@@ -332,7 +332,7 @@ function card(c, jobs) {
     meta.append(h('div', {}, h('b', { text: 'Found via: ' }), f.sources.slice(0, 4).flatMap((s, i) => [i ? ' · ' : '', link(s.name || 'article', s.url)]), ' ', h('span', { text: '(' + (f.announced_at || '').slice(0, 10) + ')' })));
   }
   const links = [];
-  if (c.website) links.push(link(c.website.replace(/^https?:\/\//, ''), c.website), c.website_confidence === 'unsure' ? h('span', { class: 'b warn', title: 'Matched from the company name only, with too little evidence that it is the right company. Check the site, or fix it with: companyfinder add "Name" --website ...', text: '⚠ unverified website' }) : (c.website_confidence === 'verified' ? h('span', { class: 'sub', title: 'Matched from the name and checked against what the news said the company does', text: ' (auto-detected)' }) : ''));
+  if (c.website) links.push(link(c.website.replace(/^https?:\/\//, ''), c.website), c.website_confidence === 'unsure' ? h('span', { class: 'b warn', title: 'Matched from the company name only, with too little evidence that it is the right company. Check the site, or fix it with: raiseradar add "Name" --website ...', text: '⚠ unverified website' }) : (c.website_confidence === 'verified' ? h('span', { class: 'sub', title: 'Matched from the name and checked against what the news said the company does', text: ' (auto-detected)' }) : ''));
   const hire = c.board_url || c.careers_url;
   if (hire) links.push(' · ', link('Hiring page', hire), c.ats ? h('span', { text: ' (' + c.ats + (c.ats_confidence === 'guessed' ? ', guessed' : '') + ')' }) : '');
   if (c.yc && c.yc.url) links.push(' · ', link('YC profile', c.yc.url));

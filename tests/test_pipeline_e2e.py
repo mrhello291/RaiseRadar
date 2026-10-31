@@ -8,11 +8,11 @@ from datetime import datetime, timedelta, timezone
 import httpx
 import pytest
 
-from companyfinder import resolve
-from companyfinder.config import Config
-from companyfinder.llm import LLMClient
-from companyfinder.pipeline import Pipeline
-from companyfinder.report import write_report
+from raiseradar import resolve
+from raiseradar.config import Config
+from raiseradar.llm import LLMClient
+from raiseradar.pipeline import Pipeline
+from raiseradar.report import write_report
 from conftest import html_response, json_response, make_fetcher
 
 
@@ -250,7 +250,7 @@ def test_out_of_scope_companies_are_ignored(env):
 
 
 def test_transient_homepage_failure_is_rechecked_tomorrow_not_in_two_weeks(env):
-    from companyfinder.util import days_since
+    from raiseradar.util import days_since
     world, cfg, db, make = env
     p = make()
     cid, _ = db.upsert_company("Flaky", origin="manual", website="https://flaky.example")
@@ -326,7 +326,7 @@ def test_recheck_regrades_and_replaces_auto_matched_websites(env):
 
 
 def now_iso_():
-    from companyfinder.util import now_iso
+    from raiseradar.util import now_iso
     return now_iso()
 
 

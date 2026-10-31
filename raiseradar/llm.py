@@ -113,7 +113,7 @@ class LLMClient:
         return self.client.post(
             f"{self.base_url}/chat/completions",
             json=body,
-            headers={"Authorization": f"Bearer {self.api_key}", "X-Title": "CompanyFinder", "HTTP-Referer": "https://localhost/companyfinder"},
+            headers={"Authorization": f"Bearer {self.api_key}", "X-Title": "RaiseRadar", "HTTP-Referer": "https://localhost/raiseradar"},
         )
 
     def _log_failure(self, model: str, finish, content: str, error: str) -> None:

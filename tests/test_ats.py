@@ -3,9 +3,9 @@ import json
 
 import pytest
 
-from companyfinder import ats
-from companyfinder.ats import ashby, greenhouse, jsonld, lever, recruitee, smartrecruiters, workable
-from companyfinder.util import strip_html
+from raiseradar import ats
+from raiseradar.ats import ashby, greenhouse, jsonld, lever, recruitee, smartrecruiters, workable
+from raiseradar.util import strip_html
 from conftest import json_response, make_fetcher
 
 

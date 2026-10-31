@@ -3,8 +3,8 @@ import json
 import httpx
 import pytest
 
-from companyfinder.db import DB
-from companyfinder.llm import LLMClient, LLMQuotaExceeded, LLMUnavailable, extract_json
+from raiseradar.db import DB
+from raiseradar.llm import LLMClient, LLMQuotaExceeded, LLMUnavailable, extract_json
 
 
 def completion(content):

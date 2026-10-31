@@ -52,9 +52,9 @@ Times are for one run on a normal connection. "Measured" means timed on this pro
 | *(no command)* / `start` | guided first use: sample report, then key setup and an optional real run | seconds, plus the real run if you accept it |
 | `demo [--open] [--out DIR]` | report from fictional sample companies; needs no key and touches none of your data | under 1 second (measured) |
 | `setup [--check] [--replace]` | check your OpenRouter key and store it in `.env` (`--check` only tests the current one) | a few seconds |
-| `run [--open]` | the whole pipeline, then rebuilds the report (`--skip-news`, `--skip-yc`, `--limit N` for quick tests; `--open` shows the page when done) | **first run ~30 minutes**; later runs a few minutes; `--skip-news` much shorter |
+| `run [--open] [--public]` | the whole pipeline, then rebuilds the report (`--skip-news`, `--skip-yc`, `--limit N` for quick tests; `--open` shows the page when done; `--public` see [Report for a public website](#report-for-a-public-website)) | **first run ~30 minutes**; later runs a few minutes; `--skip-news` much shorter |
 | `discover` / `resolve` / `careers` / `jobs` | run one stage on its own (`--limit N`; `resolve`/`careers` take `--force`) | `discover` is the slow, LLM-bound one; the others depend on how many companies are new |
-| `report [--open]` | rebuild the page, CSV and JSON from the database, no network | about 0.5 seconds with 155 companies / ~3,000 roles (measured) |
+| `report [--open] [--public]` | rebuild the page, CSV and JSON from the database, no network | about 0.5 seconds with 155 companies / ~3,000 roles (measured) |
 | `add "Acme" --website acme.com --round "Series B"` | add or correct a company by hand (also `--ats lever --slug acme` to force a job board) | instant; its jobs arrive on the next `run` |
 | `resolve --recheck` | re-grade websites that were auto-matched earlier (YC / hand-added ones are never touched) | minutes (one page fetch per company) |
 | `list [--top N]` | ranked companies in the terminal | under 1 second (measured) |
@@ -62,6 +62,27 @@ Times are for one run on a normal connection. "Measured" means timed on this pro
 | `bench [model ...]` | scores models on 8 labelled headlines (a quick sanity check, not a full benchmark) | a few minutes (free models are slow) |
 
 `--open` only works from a terminal. Under cron or in a container it is ignored, so a scheduled job never tries to start a browser.
+
+## Fork and go (GitHub Pages, no server)
+
+Get a page that updates itself twice a day, without installing anything or keeping a computer on:
+
+1. **Fork** this repository.
+2. In your fork: **Settings > Pages > Source: GitHub Actions**.
+3. **Settings > Secrets and variables > Actions > New repository secret**: name `OPENROUTER_API_KEY`, value a free key from https://openrouter.ai/keys. (No key still works: you get real Y Combinator companies and their open roles, but no funding news.)
+4. **Actions tab**: enable workflows, open **Update report**, press **Run workflow**. The first real run takes about 30 minutes; then it runs twice a day by itself (change the `cron` line in `.github/workflows/update.yml`).
+
+Your page is at `https://<your-name>.github.io/<repo-name>/`. The run summary shows what is new. To change what you see (profile, rounds, regions), edit `config.toml` in your fork. You can also set a repository *variable* `RAISERADAR_CONTACT` (an address for the User-Agent). Manual runs offer three modes: `full`, `jobs` (only refresh open roles, no AI) and `demo` (publish the sample report).
+
+Things to know:
+- **The database is kept in the Actions cache**, so later runs only read new headlines. GitHub drops a cache that is not used for 7 days (and old ones when a repository passes 10 GB); the next run is then a cold one again.
+- **The page is public** to anyone with the link, even if your repository is private (Pages for private repositories needs a paid GitHub plan). That is why it is built with `--public`: see below.
+- **Scheduled workflows in a fork are off until you enable Actions**, and GitHub pauses them after 60 days without activity in the repository. Re-enable them from the Actions tab.
+- Some company sites block cloud servers, so a run on GitHub may find a few fewer job boards than the same run at home.
+
+### Report for a public website
+
+A report on your own computer shows the full job descriptions. A public website should not republish the employers' text, so `--public` (or `[report] public = true` in `config.toml`) keeps only the first `jd_excerpt_chars` characters of each description, links to the full posting, and marks the page `noindex` so search engines skip it. The GitHub Pages workflow uses it. Everything else (roles, experience, pay, filters) is unchanged.
 
 ## The report (`reports/index.html`)
 
@@ -81,6 +102,7 @@ Also written: `companies.csv`, `jobs.csv`, `data.json`, and `digest.md` (what is
 
 - `.env`: `OPENROUTER_API_KEY`, optionally `RAISERADAR_CONTACT`, and optionally `OPENROUTER_MODEL=a,b,c` (comma-separated, first preferred, rest are fallbacks) which overrides `[llm] models`.
 - `[general]`: `db_path`, `report_dir`, `recent_days` (only companies funded within this window are processed), `new_days` (how long something counts as NEW), `contact` (put in the User-Agent; or set `RAISERADAR_CONTACT` in `.env` to keep your address out of git).
+- `[report]`: `public` (default false; same as `--public`), `jd_excerpt_chars` (700; how much of each job description a public report keeps).
 - `[funding]`: `target_rounds` (add `"Series D"` etc.), `min/max_amount_usd_m`.
 - `[news]`: Google News editions (regions), extra RSS feeds, `lookback_days`. `require_round_keyword=false` also catches "X raises $40M" headlines that never name the round (more LLM calls).
 - `[yc]`: which YC companies to include (team size, batch year, cap).
@@ -138,7 +160,7 @@ Free OpenRouter limits are small (roughly 20 requests/min and a low daily cap wi
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest -q        # ~176 offline tests (under 1 second): mocked LLM + mocked internet, full pipeline included
+.venv/bin/python -m pytest -q        # ~181 offline tests (under 1 second): mocked LLM + mocked internet, full pipeline included
 ```
 
 ## Adding an ATS

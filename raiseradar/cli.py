@@ -44,7 +44,7 @@ def cmd_run(args, cfg):
     except KeyboardInterrupt:      # everything finished so far is saved; show it and let the next run continue
         print("\nInterrupted. Building the report from what is saved so far; the next `run` continues where this one stopped.")
         stats = {"interrupted": True}
-    stats.update(write_report(p))
+    stats.update(write_report(p, public=True if getattr(args, "public", False) else None))
     stats["seconds"] = round(time.time() - t0)
     if p.llm:
         stats["llm_calls"], stats["llm_cache_hits"], stats["llm_models"] = p.llm.calls, p.llm.cache_hits, p.llm.model_used
@@ -157,7 +157,7 @@ def cmd_stage(args, cfg):
     elif args.cmd == "jobs":
         out = p.fetch_jobs(args.limit)
     else:
-        out = write_report(p)
+        out = write_report(p, public=True if getattr(args, "public", False) else None)
     print(json.dumps(out, indent=2))
     if args.cmd == "report":
         _open_if_asked(args, out.get("report"))
@@ -262,6 +262,7 @@ def main(argv=None):
     r.add_argument("--skip-news", action="store_true"); r.add_argument("--skip-yc", action="store_true")
     r.add_argument("--limit", type=int, default=0, help="max companies per stage (for quick tests)")
     r.add_argument("--open", action="store_true", help="open the report in your browser when done (terminal only; ignored under cron)")
+    r.add_argument("--public", action="store_true", help="write the report for a public website: job descriptions shortened to an excerpt, page marked noindex")
     r.set_defaults(fn=cmd_run)
 
     d = sub.add_parser("discover", help="stage 1-2: funding news (LLM) and YC")
@@ -275,6 +276,7 @@ def main(argv=None):
             s.add_argument("--force", action="store_true", help="redo even if checked recently")
         if name == "report":
             s.add_argument("--open", action="store_true", help="open the report in your browser (terminal only)")
+            s.add_argument("--public", action="store_true", help="write the report for a public website: job descriptions shortened to an excerpt, page marked noindex")
         if name == "resolve":
             s.add_argument("--recheck", action="store_true", help="also re-grade websites that were auto-matched earlier")
         s.set_defaults(fn=cmd_stage)

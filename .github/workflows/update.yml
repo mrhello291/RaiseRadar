@@ -1,0 +1,99 @@
+name: Update report
+
+# Fork-and-go: build the RaiseRadar report on a schedule and publish it to GitHub Pages.
+# One-time setup in your fork (see "Fork and go" in the README):
+#   1. Settings > Pages > Source: GitHub Actions
+#   2. Settings > Secrets and variables > Actions > New repository secret: OPENROUTER_API_KEY
+#   3. Actions tab > "Update report" > Run workflow  (the first real run takes about 30 minutes)
+# Your own settings (profile, rounds, regions) live in config.toml: edit it in your fork.
+
+on:
+  schedule:
+    - cron: "23 6,18 * * *"        # twice a day, UTC. Edit to taste.
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "full = news + companies + jobs; jobs = only refresh the open roles (no AI); demo = publish the sample report"
+        type: choice
+        options: [full, jobs, demo]
+        default: full
+
+permissions:
+  contents: read
+
+concurrency:
+  group: raiseradar-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      MODE: ${{ inputs.mode || 'full' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        run: pip install .
+
+      # The database (and the AI answers in it) is kept between runs, so later runs only read new headlines.
+      - name: Restore the database
+        uses: actions/cache/restore@v6
+        with:
+          path: data
+          key: raiseradar-data-${{ github.run_id }}
+          restore-keys: raiseradar-data-
+
+      - name: Build the report
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          RAISERADAR_CONTACT: ${{ vars.RAISERADAR_CONTACT }}
+        run: |
+          case "$MODE" in
+            demo)
+              raiseradar demo --out reports ;;
+            jobs)
+              raiseradar jobs
+              raiseradar report --public ;;
+            *)
+              if [ -n "$OPENROUTER_API_KEY" ]; then
+                raiseradar run --public
+              else
+                echo "::notice title=No OPENROUTER_API_KEY secret::Funding news is skipped, so you only get Y Combinator companies and ones you added. Add the secret (a free key from https://openrouter.ai/keys) to get funding news."
+                raiseradar run --skip-news --public
+              fi ;;
+          esac
+
+      # Saved even when a later step fails, so a long first run is never lost.
+      - name: Save the database
+        if: ${{ always() && hashFiles('data/**') != '' }}
+        uses: actions/cache/save@v6
+        with:
+          path: data
+          key: raiseradar-data-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: What is new
+        if: ${{ always() && hashFiles('reports/digest.md') != '' }}
+        run: cat reports/digest.md >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: reports
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

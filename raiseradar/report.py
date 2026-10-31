@@ -136,15 +136,47 @@ def write_digest(data: dict, out_dir: Path) -> str:
     return text
 
 
-def write_report(p: Pipeline, out_dir: Path | None = None) -> dict:
-    return write_files(build_data(p), out_dir or p.cfg.path("general", "report_dir"))
+def excerpt(text: str, chars: int) -> tuple[str, bool]:
+    """First `chars` characters of a job description, cut at a word boundary. Returns (text, was_cut)."""
+    text = (text or "").strip()
+    if len(text) <= chars:
+        return text, False
+    if chars <= 0:
+        return "", True
+    cut = text[:chars]
+    if not text[chars].isspace():                       # do not end in the middle of a word
+        space = cut.rfind(" ")
+        if space > chars // 2:
+            cut = cut[:space]
+    return cut.rstrip() + " ...", True
+
+
+def make_public(data: dict, jd_chars: int) -> dict:
+    """Prepare a report for a public website: job descriptions are the employers' text, so show an excerpt and link to the posting."""
+    data["public"] = {"jd_chars": jd_chars}
+    for c in data["companies"]:
+        for j in c["jobs"]:
+            j["description"], j["excerpt"] = excerpt(j["description"], jd_chars)
+    return data
+
+
+def write_report(p: Pipeline, out_dir: Path | None = None, public: bool | None = None) -> dict:
+    """Write the report files. `public` (default: [report] public in config.toml) shortens job descriptions and asks search engines not to index the page."""
+    rc = p.cfg["report"]
+    data = build_data(p)
+    if public if public is not None else rc["public"]:
+        make_public(data, int(rc["jd_excerpt_chars"]))
+    return write_files(data, out_dir or p.cfg.path("general", "report_dir"))
 
 
 def write_files(data: dict, out_dir: Path) -> dict:
     out_dir = Path(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     blob = json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
-    (out_dir / "index.html").write_text(HTML.replace("__DATA__", blob), encoding="utf-8")
+    html = HTML.replace("__DATA__", blob)
+    if data.get("public"):
+        html = html.replace('<meta charset="utf-8">', '<meta charset="utf-8"><meta name="robots" content="noindex, nofollow">', 1)
+    (out_dir / "index.html").write_text(html, encoding="utf-8")
     (out_dir / "data.json").write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
     write_csv(data, out_dir)
     write_digest(data, out_dir)
@@ -306,6 +338,7 @@ function jobRows(jobs) {
     const jd = h('tr', { class: 'jd-row', style: 'display:none' }, h('td', { colspan: 6 },
       h('div', { class: 'ev', text: j.exp_mentions.length ? 'Experience mentions: ' + j.exp_mentions.join('  |  ') : (j.exp_source === 'title' ? 'Experience inferred from the job title' : j.exp_source === 'level' ? 'Experience inferred from the ATS level' : 'No explicit experience requirement found') }),
       h('div', { class: 'jd', text: j.description || '(no description published)' }),
+      j.excerpt ? h('div', { class: 'sub' }, 'Excerpt only. Full description: ', link('on the employer page', j.url)) : '',
       h('div', {}, link('Open posting →', j.url), ' ', j.apply_url && j.apply_url !== j.url ? link('Apply →', j.apply_url) : '')));
     const tr = h('tr', { class: 'job' },
       h('td', {}, h('b', { text: j.title }), ' ', j.is_new ? badge('NEW', 'ok') : '', j.matches ? badge('fits you') : ''),

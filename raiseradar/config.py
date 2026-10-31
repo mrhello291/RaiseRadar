@@ -16,6 +16,10 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "new_days": 3,
         "contact": "",
     },
+    "report": {
+        "public": False,
+        "jd_excerpt_chars": 700,
+    },
     "funding": {
         "target_rounds": ["Series B", "Series C"],
         "min_amount_usd_m": 0,

@@ -66,6 +66,26 @@ DEFAULTS: dict[str, dict[str, Any]] = {
         "follow_up_days": 14,           # an application with no news for this many days is flagged
         "embed_in_report": True,        # show your applications inside index.html (never in data.json, CSV or the digest)
     },
+    "outreach": {
+        "enabled": False,               # master switch for SENDING. Drafting and asking you work without it.
+        "me_path": "data/me.toml",      # everything the bot may say about you
+        "db_path": "data/outreach.db",  # drafts, approvals, blocked addresses (back it up; not part of the job cache)
+        "daily_cap": 8,                 # emails per rolling 24 hours, however many you approve
+        "min_gap_seconds": 120,         # pause between two emails in one run (randomised up to 1.5x)
+        "min_match_score": 0.5,         # 0-1 fit between a role and your skills/projects; raise it to write less, better
+        "max_drafts_per_run": 5,
+        "max_pending": 10,              # never leave more than this waiting for you
+        "max_leads_per_run": 8,         # companies with no public email become "apply directly" leads, up to this many per run
+        "max_lookups_per_run": 30,      # website lookups for contact addresses per run (about 4 s each; results are remembered)
+        "max_funding_age_days": 120,    # the round is only mentioned in the email if it is this recent
+        "approval_ttl_hours": 72,       # a draft you do not answer, or an approval that is not sent, expires
+        "ntfy_server": "https://ntfy.sh",
+        "smtp_host": "smtp.gmail.com",
+        "smtp_port": 465,               # 465 = SSL, 587 = STARTTLS
+        "gmail_drafts": True,           # put a copy of each draft in your Gmail Drafts to edit, and check Sent before sending
+        "imap_host": "imap.gmail.com",  # same login as SMTP (the app password)
+        "imap_port": 993,
+    },
     "profile": {
         "roles": [],
         "exclude_titles": [],

@@ -14,6 +14,7 @@ from .db import DB
 from .http import Fetcher
 from .llm import LLMClient, LLMError, list_free_models
 from .onboarding import COLD_RUN, ask, interactive, setup_key
+from .outreach import STATUSES as OUTREACH_STATUSES
 from .pipeline import Pipeline
 from .report import write_report
 from .util import norm_name, now_iso
@@ -305,6 +306,239 @@ def cmd_track(args, cfg):
             db.close()
 
 
+def cmd_me(args, cfg):
+    """Your profile for the outreach bot: data/me.toml (private, never in reports)."""
+    from .me import init_me, load_me
+    path = cfg.path("outreach", "me_path")
+    if args.me_cmd == "init":
+        if init_me(path):
+            print(f"Wrote {path}\nEdit it (it is plain text), then run: raiseradar me check")
+        else:
+            print(f"{path} already exists; not overwritten. Edit it directly.")
+        return
+    me = load_me(path)
+    if not path.is_file():
+        sys.exit(f"No profile yet. Run: raiseradar me init   (creates {path})")
+    if args.me_cmd == "show":
+        print(me.facts())
+        for p in me.projects:
+            print(f"\nProject: {p.name}  [{', '.join(p.tags)}]\n  {p.summary}  {p.url}")
+        print("\nRoles wanted: " + ", ".join(me.roles_wanted))
+        if me.years_experience:
+            print(f"Years of experience: {me.years_experience:g}")
+    miss = me.missing()
+    print("\nProfile is complete." if not miss else "\nStill to fill in: " + "; ".join(miss))
+    if miss and args.me_cmd == "check":
+        sys.exit(1)
+
+
+def _env_set(path: Path, items: dict[str, str]) -> list[str]:
+    """Add KEY=VALUE lines to .env for keys that are not there yet (never overwrites). Returns the keys written."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    text = path.read_text(encoding="utf-8") if path.is_file() else ""
+    have = {ln.split("=", 1)[0].strip() for ln in text.splitlines() if "=" in ln and not ln.strip().startswith("#")}
+    add = {k: v for k, v in items.items() if k not in have}
+    if add:
+        path.write_text(text + ("" if not text or text.endswith("\n") else "\n") + "".join(f"{k}={v}\n" for k, v in add.items()), encoding="utf-8")
+        path.chmod(0o600)
+    return list(add)
+
+
+def _outreach_parts(cfg, need_llm=True, need_fetch=True):
+    import os
+    from . import tracker as tr
+    from .me import load_me
+    from .outreach import Outreach, Store
+    path = cfg.path("general", "db_path")
+    p, db, f = build(cfg, need_llm=need_llm)
+    me = load_me(cfg.path("outreach", "me_path"))
+    store = Store(cfg.path("outreach", "db_path"))
+    t = tr.Tracker(cfg.path("tracker", "path"))
+    return Outreach(cfg, me, store, db, fetcher=f if need_fetch else None, llm=p.llm, tracker=t, env=os.environ), db, f
+
+
+def _show_draft(d: dict, facts: dict | None = None) -> None:
+    print(f"#{d['id']}  {d['status']}  {d['company']} - {d['role_title']}  (fit {d['score']})\n  to: {d['to_email']}\n  subject: {d['subject']}\n")
+    print("  " + d["body"].replace("\n", "\n  ") + "\n")
+    if facts is not None:
+        if d.get("job_url"):
+            print(f"  job post: {d['job_url']}")
+        if facts.get("skills"):
+            print("  your skills it asks for: " + ", ".join(facts["skills"]))
+        if facts.get("exp_min") is not None:
+            print(f"  asks for {facts['exp_min']:g}+ years")
+        if facts.get("jd"):
+            print("  from the job post:\n    " + facts["jd"].replace("\n", "\n    "))
+        print()
+
+
+def _outreach_schedule(args, cfg):
+    from . import schedule as sch
+    if args.off:
+        gone = sch.remove() if sch.has_systemd() else []
+        print("Removed: " + ", ".join(gone) if gone else "No RaiseRadar timers were installed. (If you used cron, remove the lines with `crontab -e`.)")
+        return
+    try:
+        plan = sch.jobs(cfg.root, sys.executable, args.every, args.refresh)
+    except ValueError as exc:
+        sys.exit(f"error: {exc}")
+    if args.print or not sch.has_systemd():
+        if not sch.has_systemd():
+            print("No systemd here. Add these lines with `crontab -e`:\n")
+        else:
+            for n, (d, c, w) in plan.items():
+                print(f"# ~/.config/systemd/user/{n}.service and .timer ({w})\n" + "\n".join(sch.units(n, d, c, w, cfg.root)))
+            print("Or, with cron:\n")
+        print("\n".join(sch.cron_lines(plan, args.every, cfg.root)))
+        return
+    names = sch.install(cfg.root, sys.executable, args.every, args.refresh)
+    print(f"Installed and started: {', '.join(names)}")
+    print(f"`outreach run` now runs every {args.every} minutes while you are logged in; a run missed during sleep happens on wake-up.")
+    if not cfg["outreach"]["enabled"]:
+        print("Sending is still OFF: it drafts and asks you, approved emails wait. Set [outreach] enabled = true in config.toml to send.")
+    print("\nSee runs:   journalctl --user -u raiseradar-outreach -n 50"
+          "\nNext run:   systemctl --user list-timers 'raiseradar-*'"
+          "\nStop:       raiseradar outreach schedule --off"
+          "\nTo keep running while logged out: loginctl enable-linger $USER")
+
+
+def cmd_outreach(args, cfg):
+    import secrets
+    from . import mailer, notify
+    from .outreach import OutreachError
+    sub = args.out_cmd
+    o = cfg["outreach"]
+    try:
+        if sub == "setup":
+            added = _env_set(cfg.root / ".env", {"OUTREACH_NTFY_TOPIC": "rr-" + secrets.token_urlsafe(18),
+                                                 "OUTREACH_NTFY_REPLY_TOPIC": "rr-" + secrets.token_urlsafe(18),
+                                                 "OUTREACH_APPROVAL_SECRET": secrets.token_urlsafe(32)})
+            import os
+            from .config import load_dotenv
+            load_dotenv(cfg.root / ".env")
+            print("Created approval keys in .env: " + ", ".join(added) if added else "Approval keys already exist in .env (kept).")
+            print(f"\nOn your phone: install the ntfy app, add server {o['ntfy_server']} and subscribe to topic:\n  {os.environ['OUTREACH_NTFY_TOPIC']}"
+                  "\n(The topic name is the only thing protecting who can read the drafts, so keep it private.)"
+                  "\n\nStill to add to .env yourself (Gmail: Google Account > Security > 2-Step Verification > App passwords):"
+                  "\n  OUTREACH_SMTP_USER=you@gmail.com\n  OUTREACH_SMTP_PASSWORD=<16-character app password>"
+                  "\nThen: raiseradar me init && raiseradar outreach check")
+            return
+        if sub == "schedule":
+            _outreach_schedule(args, cfg)
+            return
+        if sub == "block":
+            from .outreach import Store
+            print("Blocked:", Store(cfg.path("outreach", "db_path")).block(args.pattern, args.reason or ""))
+            return
+        ou, db, f = _outreach_parts(cfg, need_llm=sub == "run", need_fetch=sub in ("run", "contact"))
+        try:
+            if sub == "check":
+                import os
+                print("profile: " + ("complete" if not ou.me.missing() else "missing " + "; ".join(ou.me.missing())))
+                try:
+                    mailer.check_login(o["smtp_host"], int(o["smtp_port"]), os.environ.get("OUTREACH_SMTP_USER", ""), os.environ.get("OUTREACH_SMTP_PASSWORD", ""))
+                    print("mail login: ok (nothing was sent)")
+                except mailer.MailError as exc:
+                    print(f"mail login: FAILED - {exc}")
+                if ou.gmail_on():
+                    from .gmailbox import MailboxError, check_login as imap_check
+                    try:
+                        folder = imap_check(o["imap_host"], int(o["imap_port"]), ou.smtp_user, os.environ.get("OUTREACH_SMTP_PASSWORD", ""))
+                        print(f"gmail drafts: ok (editing copies go to {folder}; Sent is checked before sending)")
+                    except MailboxError as exc:
+                        print(f"gmail drafts: FAILED - {exc}. Turn on IMAP in Gmail settings, or set [outreach] gmail_drafts = false")
+                else:
+                    print("gmail drafts: off (needs the mail login; [outreach] gmail_drafts)")
+                if ou.phone_ready():
+                    ok = notify.publish(o["ntfy_server"], ou.topic, ou.reply_topic, ou.secret,
+                                        {"id": 0, "company": "Test", "role_title": "Test notification", "score": 1.0, "to_email": "nobody@example.com",
+                                         "subject": "Test", "body": "This is a test of the approval notification. The buttons do nothing.",
+                                         "job_url": "https://ntfy.sh"},
+                                        facts={"skills": ["python"], "exp_min": 1, "years": 1, "jd": "Requirements: (the job post's own words appear here)"},
+                                        edit_url=ou.gmail_edit_url() if ou.gmail_on() else None)
+                    print("phone notification: " + ("sent (check your phone)" if ok else "FAILED (is the ntfy server reachable?)"))
+                else:
+                    print("phone notification: not set up. Run: raiseradar outreach setup")
+                print(f"sending is {'ON' if o['enabled'] else 'OFF'} ([outreach] enabled in config.toml); cap {o['daily_cap']}/day")
+            elif sub == "run":
+                res = ou.run(dry_run=args.dry_run, limit=args.limit)
+                if args.dry_run:
+                    for d in res["drafts"]:
+                        _show_draft({**d, "id": "-", "status": "dry run"})
+                    for l in res["leads"]:
+                        print(f"LEAD (no public email) {l['company']}: {l['role_title']}\n  apply: {l['apply_url']}\n  LinkedIn note ({len(l['linkedin_note'])} chars): {l['linkedin_note']}\n")
+                    print(f"{len(res['drafts'])} draft(s) and {len(res['leads'])} apply-directly lead(s) (dry run: nothing stored, asked or sent).")
+                else:
+                    print(json.dumps(res, indent=2))
+                    if not o["enabled"]:
+                        print("\nNote: sending is OFF. Approved drafts wait. Set [outreach] enabled = true in config.toml when you are ready.")
+                    if not ou.phone_ready():
+                        print("Note: no phone approval set up (`raiseradar outreach setup`); review in the terminal with `raiseradar outreach review`.")
+            elif sub == "status":
+                rows = ou.store.list(args.status)
+                for d in rows[:40]:
+                    print(f"#{d['id']:<4} {d['status']:<9} {d['company'][:24]:24} {d['role_title'][:36]:36} -> {d['to_email']}" + (f"   ({d['error']})" if d["error"] else ""))
+                print(f"\n{len(rows)} draft(s); sent in the last 24h: {len(ou.store.sent_since(24))}/{o['daily_cap']}; blocked: {len(ou.store.blocked())}")
+            elif sub == "leads":
+                if args.done:
+                    if not ou.store.get_lead(args.done):
+                        sys.exit(f"no lead #{args.done}")
+                    ou.store.set_lead(args.done, status="done")
+                    print(f"Lead #{args.done} marked done.")
+                elif args.show:
+                    l = ou.store.get_lead(args.show)
+                    if not l:
+                        sys.exit(f"no lead #{args.show}")
+                    print(f"#{l['id']}  {l['company']} - {l['role_title']}  ({l['status']})\n  apply: {l['apply_url'] or l['job_url']}\n  best project: {l['project']}\n")
+                    print(f"LinkedIn note ({len(l['linkedin_note'])} chars):\n  {l['linkedin_note']}\n")
+                    print("Message to paste into an application or a longer LinkedIn message:\n  " + (l["message"] or "(none: no draft could be written)").replace("\n", "\n  "))
+                else:
+                    rows = ou.store.leads(None if args.all else "new")
+                    for l in rows:
+                        print(f"#{l['id']:<4} {l['status']:<8} {l['company'][:24]:24} {l['role_title'][:36]:36} {l['apply_url'] or l['job_url']}")
+                    print(f"\n{len(rows)} lead(s). See the texts: raiseradar outreach leads --show ID   Done: --done ID")
+            elif sub == "show":
+                d = ou.store.get(args.id)
+                if not d:
+                    sys.exit(f"no draft #{args.id}")
+                _show_draft(d, ou.facts(d))
+            elif sub in ("approve", "skip"):
+                d = ou.store.get(args.id)
+                if not d:
+                    sys.exit(f"no draft #{args.id}")
+                if not ou.store.decide(args.id, sub, "terminal"):
+                    sys.exit(f"#{args.id} is {d['status']}, not pending")
+                print(f"#{args.id} {'approved' if sub == 'approve' else 'skipped'}." + (" It is sent by the next `outreach run` (or `outreach send`)." if sub == "approve" else ""))
+            elif sub == "send":
+                print(json.dumps(ou.send_approved(), indent=2))
+            elif sub == "review":
+                pend = list(reversed(ou.store.list("pending")))
+                if not pend:
+                    print("Nothing waiting for your approval.")
+                for d in pend:
+                    _show_draft(d, ou.facts(d))
+                    ans = ask("[s]end  [k] skip  [b]lock this company  [enter] later > ").strip().lower()
+                    if ans.startswith("s"):
+                        ou.store.decide(d["id"], "approve", "terminal")
+                    elif ans.startswith("k"):
+                        ou.store.decide(d["id"], "skip", "terminal")
+                    elif ans.startswith("b"):
+                        ou.store.block(d["domain"], "blocked in review")
+                if pend:
+                    print(json.dumps(ou.send_approved(), indent=2))
+            elif sub == "contact":
+                if args.contact_cmd == "add":
+                    ou.store.add_contact(args.domain, args.email)
+                    print(f"Added {args.email} for {args.domain}")
+                else:
+                    for k in ou.store.contacts_for(args.domain):
+                        print(f"{k['email']:40} {k['source_url']}")
+        finally:
+            db.close()
+    except OutreachError as exc:
+        sys.exit(f"error: {exc}")
+
+
 def cmd_models(args, cfg):
     for m in list_free_models():
         print(f"{m['id']:55} ctx={m['context']:>8} json={'Y' if m['json'] else '-'} tools={'Y' if m['tools'] else '-'}")
@@ -424,6 +658,43 @@ def main(argv=None):
     x = ts.add_parser("note", help="set the note of a tracked role"); x.add_argument("--text", required=True); x.add_argument("query", nargs="+")
     x = ts.add_parser("rm", help="stop tracking a role"); x.add_argument("query", nargs="+")
     tk.set_defaults(fn=cmd_track)
+
+    me_p = sub.add_parser("me", help="your profile for the outreach bot (data/me.toml)")
+    ms = me_p.add_subparsers(dest="me_cmd", required=True)
+    ms.add_parser("init", help="create data/me.toml from a template (never overwrites)")
+    ms.add_parser("show", help="print what the bot knows about you")
+    ms.add_parser("check", help="say what is still missing (exit 1 if anything)")
+    me_p.set_defaults(fn=cmd_me)
+
+    ot = sub.add_parser("outreach", help="draft cold emails to founders about roles that fit you; you approve from your phone")
+    os_ = ot.add_subparsers(dest="out_cmd", required=True)
+    os_.add_parser("setup", help="create the private approval topics and secret in .env and explain the phone and Gmail steps")
+    os_.add_parser("check", help="test the mail login (sends nothing), the phone notification and your profile")
+    x = os_.add_parser("run", help="collect your taps, draft new emails, ask you, send what is approved (cron-friendly)")
+    x.add_argument("--dry-run", action="store_true", help="print the drafts it would make; store, ask and send nothing")
+    x.add_argument("--limit", type=int, help="max new drafts")
+    x = os_.add_parser("status", help="list drafts"); x.add_argument("--status", choices=list(OUTREACH_STATUSES))
+    x = os_.add_parser("schedule", help="run `outreach run` by itself every N minutes (systemd user timer; prints cron lines otherwise)")
+    x.add_argument("--every", type=int, default=30, metavar="MIN", help="minutes between runs (default 30)")
+    x.add_argument("--refresh", action="store_true", help="also refresh the job data: full run twice a day, jobs every 4 hours")
+    x.add_argument("--off", action="store_true", help="remove the timers")
+    x.add_argument("--print", action="store_true", help="only print what would be installed")
+    x = os_.add_parser("leads", help="companies with no public email: apply link, LinkedIn note and message to paste")
+    x.add_argument("--show", type=int, metavar="ID", help="print the texts for one lead")
+    x.add_argument("--done", type=int, metavar="ID", help="mark a lead as handled")
+    x.add_argument("--all", action="store_true", help="include handled leads")
+    x = os_.add_parser("show", help="print one draft"); x.add_argument("id", type=int)
+    x = os_.add_parser("approve", help="approve a pending draft from the terminal"); x.add_argument("id", type=int)
+    x = os_.add_parser("skip", help="reject a pending draft"); x.add_argument("id", type=int)
+    os_.add_parser("review", help="go through pending drafts in the terminal (send / skip / block)")
+    os_.add_parser("send", help="send approved drafts now (respects the daily cap and the on/off switch)")
+    x = os_.add_parser("block", help="never email this domain or address (also skips its pending drafts)")
+    x.add_argument("pattern"); x.add_argument("--reason")
+    cx = os_.add_parser("contact", help="addresses the bot may use for a company")
+    cs = cx.add_subparsers(dest="contact_cmd", required=True)
+    x = cs.add_parser("add", help="add a founder or hiring address you know"); x.add_argument("domain"); x.add_argument("email")
+    x = cs.add_parser("list", help="show known addresses for a domain"); x.add_argument("domain")
+    ot.set_defaults(fn=cmd_outreach)
 
     l = sub.add_parser("list", help="print the ranked companies"); l.add_argument("--top", type=int, default=40); l.set_defaults(fn=cmd_list)
     sub.add_parser("models", help="show currently free OpenRouter models").set_defaults(fn=cmd_models)
